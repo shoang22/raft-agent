@@ -1,4 +1,5 @@
 """Integration tests for the HTTP orders client adapter."""
+import json
 import pytest
 import requests
 from unittest.mock import patch, MagicMock
@@ -10,6 +11,10 @@ def _mock_response(text: str, status_code: int = 200):
     mock = MagicMock()
     mock.status_code = status_code
     mock.text = text
+    try:
+        mock.json.return_value = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        mock.json.side_effect = ValueError("No JSON")
     if status_code >= 400:
         mock.raise_for_status.side_effect = requests.HTTPError(f"{status_code} Error")
     else:
@@ -18,16 +23,17 @@ def _mock_response(text: str, status_code: int = 200):
 
 
 class TestFetchAllOrders:
-    def test_success_returns_raw_response_text(self):
-        body = '{"status":"ok","raw_orders":["Order 1001: Buyer=John Davis"]}'
+    def test_success_returns_raw_order_list(self):
+        raw_orders = ["Order 1001: Buyer=John Davis"]
+        body = json.dumps({"status": "ok", "raw_order": raw_orders})
         with patch("raft_llm.adapters.orders_client.requests.get") as mock_get:
             mock_get.return_value = _mock_response(body)
             result = OrdersAPIClient(base_url="http://localhost:5001").fetch_orders()
-            assert result == body
+            assert result == raw_orders
 
     def test_with_limit_passes_query_param(self):
         with patch("raft_llm.adapters.orders_client.requests.get") as mock_get:
-            mock_get.return_value = _mock_response('{"status":"ok","raw_orders":[]}')
+            mock_get.return_value = _mock_response('{"status":"ok","raw_order":[]}')
             OrdersAPIClient(base_url="http://localhost:5001").fetch_orders(limit=1)
             assert mock_get.call_args[1]["params"]["limit"] == 1
 
@@ -47,12 +53,13 @@ class TestFetchAllOrders:
 
 
 class TestFetchOrderById:
-    def test_found_returns_raw_response_text(self):
-        body = '{"status":"ok","raw_order":"Order 1003: Buyer=Mike Turner, Location=Cleveland, OH, Total=$1299.99"}'
+    def test_found_returns_raw_order_text(self):
+        raw_order = "Order 1003: Buyer=Mike Turner, Location=Cleveland, OH, Total=$1299.99"
+        body = json.dumps({"status": "ok", "raw_order": raw_order})
         with patch("raft_llm.adapters.orders_client.requests.get") as mock_get:
             mock_get.return_value = _mock_response(body)
             result = OrdersAPIClient(base_url="http://localhost:5001").fetch_order_by_id("1003")
-            assert result == body
+            assert result == raw_order
 
     def test_not_found_raises_api_error(self):
         with patch("raft_llm.adapters.orders_client.requests.get") as mock_get:

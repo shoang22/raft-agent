@@ -39,7 +39,7 @@ class SqlAlchemyOrderRepository(AbstractOrderRepository):
         self._conn.execute(
             orders_table.insert(),
             [
-                {"order_id": o.orderId, "buyer": o.buyer, "state": o.state, "total": o.total}
+                {"order_id": o.orderId, "buyer": o.buyer, "state": o.state.value, "total": o.total}
                 for o in orders
             ],
         )

@@ -20,13 +20,6 @@ SAMPLE_RAW_ORDERS = [
     "Order 1005: Buyer=Chris Myers, Location=Cincinnati, OH, Total=$512.00, Items: monitor",
 ]
 
-_ORDERS_ALL = OrdersOutput(orders=[
-    Order(orderId="1001", buyer="John Davis", state="OH", total=742.10),
-    Order(orderId="1002", buyer="Sarah Liu", state="TX", total=156.55),
-    Order(orderId="1003", buyer="Mike Turner", state="OH", total=1299.99),
-    Order(orderId="1005", buyer="Chris Myers", state="OH", total=512.00),
-])
-
 RAW_OHIO_ORDERS = [
     "Order 1001: Buyer=John Davis, Location=Columbus, OH, Total=$742.10, Items: laptop, hdmi cable",
     "Order 1002: Buyer=Sarah Liu, Location=Austin, TX, Total=$156.55, Items: headphones",
@@ -111,6 +104,10 @@ class TestGenerateSqlQuery:
 
 
 _ORDER_1001 = OrdersOutput(orders=[Order(orderId="1001", buyer="John Davis", state="OH", total=742.10)])
+_ORDER_1002 = OrdersOutput(orders=[Order(orderId="1002", buyer="Sarah Liu", state="TX", total=156.55)])
+_ORDER_1003 = OrdersOutput(orders=[Order(orderId="1003", buyer="Mike Turner", state="OH", total=1299.99)])
+_ORDER_1005 = OrdersOutput(orders=[Order(orderId="1005", buyer="Chris Myers", state="OH", total=512.00)])
+_ORDERS_SAMPLE = [_ORDER_1001, _ORDER_1002, _ORDER_1003, _ORDER_1005]
 
 
 class TestRunAgent:
@@ -122,7 +119,7 @@ class TestRunAgent:
         llm = FakeLLM(
             responses=["SELECT * FROM orders WHERE state = 'OH' AND total >= 500"],
             tool_call_responses=[_TOOL_FETCH_ALL],
-            structured_responses=[_ORDERS_ALL],
+            structured_responses=_ORDERS_SAMPLE,
         )
 
         result = self._run("Show me all orders from Ohio with total over 500", client, llm)
@@ -138,7 +135,7 @@ class TestRunAgent:
         llm = FakeLLM(
             responses=["SELECT * FROM orders WHERE state = 'FL'"],
             tool_call_responses=[_TOOL_FETCH_ALL],
-            structured_responses=[_ORDER_1001],
+            structured_responses=_ORDERS_SAMPLE,
         )
 
         result = self._run("Orders from Florida", client, llm)

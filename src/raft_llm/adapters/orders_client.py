@@ -17,7 +17,7 @@ class OrdersAPIClient(AbstractOrdersClient):
     def __init__(self, base_url: str = "http://localhost:5001"):
         self.base_url = base_url.rstrip("/")
 
-    def fetch_orders(self, limit: Optional[int] = None) -> str:
+    def fetch_orders(self, limit: Optional[int] = None) -> list:
         params = {}
         if limit is not None:
             params["limit"] = limit
@@ -34,7 +34,7 @@ class OrdersAPIClient(AbstractOrdersClient):
             raise APIError(str(e)) from e
 
         logger.info("Received orders response (%d bytes)", len(response.text))
-        return response.text
+        return response.json()["raw_order"]
 
     def fetch_order_by_id(self, order_id: str) -> str:
         url = f"{self.base_url}/api/order/{order_id}"
@@ -48,4 +48,4 @@ class OrdersAPIClient(AbstractOrdersClient):
         except requests.RequestException as e:
             raise APIError(str(e)) from e
 
-        return response.text
+        return response.json()["raw_order"]

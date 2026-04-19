@@ -3,6 +3,10 @@ import logging
 import math
 import re
 
+import chromadb
+from langsmith import expect
+from pydantic import ValidationError
+
 from raft_llm.adapters.abstractions import AbstractLLM
 from raft_llm.domain.models import FilterCriteria, Order, OrdersOutput
 
@@ -35,6 +39,25 @@ _SQL_SYSTEM = (
 
 class ParseError(Exception):
     pass
+
+
+def vector_search(query: str, collection: chromadb.Collection):
+    tgt = [Order.model_validate(doc) for doc in collection.get()]
+
+    result = collection.query(query_texts=[query], n_results=1)
+
+
+# each function takes a response and chunks them
+def to_target(source: str, llm: AbstractLLM):
+    result = llm.invoke_structured(
+        [
+            {"role": "system", "content": _PARSE_SYSTEM},
+            {"role": "user", "content": source},
+        ],
+        OrdersOutput,
+    ) 
+    
+    
 
 
 def parse_raw_orders(

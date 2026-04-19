@@ -20,35 +20,28 @@ class AgentError(Exception):
 class AgentState(TypedDict):
     query: str
     tool_name: Optional[str]
-    tool_args: dict
     raw_orders: list[str]
     parsed_orders: list[Order]
     query_results: list[dict]
     error: Optional[str]
 
 
-def _decide_node(state: AgentState, llm: AbstractLLM, tools: list) -> dict:
-    logger.info("[decide] LLM selecting tool for query: %r", state["query"])
+def _fetch_node(state: AgentState, llm: AbstractLLM, tools: list) -> dict:
+    logger.info("[fetch] LLM selecting tool for query: %r", state["query"])
     tool_call: ToolCall = llm.invoke_with_tools(
         [{"role": "user", "content": state["query"]}],
         tools,
     )
-    logger.info("[decide] LLM chose tool: %s args=%s", tool_call.name, tool_call.arguments)
-    return {"tool_name": tool_call.name, "tool_args": tool_call.arguments}
-
-
-def _execute_tool_node(state: AgentState, tools: list) -> dict:
-    tool_name = state["tool_name"]
-    tool_args = state["tool_args"]
-    tool = next((t for t in tools if t.name == tool_name), None)
+    logger.info("[fetch] LLM chose tool: %s args=%s", tool_call.name, tool_call.arguments)
+    tool = next((t for t in tools if t.name == tool_call.name), None)
     if tool is None:
-        return {"error": f"Unknown tool: {tool_name!r}"}
-    logger.info("[execute] Calling tool %r with args %s", tool_name, tool_args)
+        return {"tool_name": tool_call.name, "error": f"Unknown tool: {tool_call.name!r}"}
     try:
-        raw_orders: list[str] = tool.invoke(tool_args)
-        return {"raw_orders": raw_orders}
+        raw = tool.invoke(tool_call.arguments)
+        raw_orders: list[str] = [raw] if isinstance(raw, str) else list(raw)
+        return {"tool_name": tool_call.name, "raw_orders": raw_orders}
     except APIError as e:
-        return {"error": str(e)}
+        return {"tool_name": tool_call.name, "error": str(e)}
 
 
 def _parse_node(state: AgentState, llm: AbstractLLM) -> dict:
@@ -107,16 +100,14 @@ def _post_parse_dispatch(state: AgentState) -> str:
 def create_graph(llm: AbstractLLM, tools: list, uow: AbstractUnitOfWork):
     builder = StateGraph(AgentState)
 
-    builder.add_node("decide", lambda state: _decide_node(state, llm, tools))  # type: ignore[arg-type]
-    builder.add_node("execute_tool", lambda state: _execute_tool_node(state, tools))  # type: ignore[arg-type]
+    builder.add_node("fetch", lambda state: _fetch_node(state, llm, tools))  # type: ignore[arg-type]
     builder.add_node("parse", lambda state: _parse_node(state, llm))  # type: ignore[arg-type]
     builder.add_node("store", lambda state: _store_node(state, uow))  # type: ignore[arg-type]
     builder.add_node("query", lambda state: _query_node(state, llm, uow))  # type: ignore[arg-type]
     builder.add_node("format_single", _format_single_node)
 
-    builder.add_edge(START, "decide")
-    builder.add_edge("decide", "execute_tool")
-    builder.add_conditional_edges("execute_tool", _should_continue, {"continue": "parse", "error": END})
+    builder.add_edge(START, "fetch")
+    builder.add_conditional_edges("fetch", _should_continue, {"continue": "parse", "error": END})
     builder.add_conditional_edges(
         "parse",
         _post_parse_dispatch,
@@ -146,7 +137,6 @@ def run_agent(
     initial_state: AgentState = {
         "query": query,
         "tool_name": None,
-        "tool_args": {},
         "raw_orders": [],
         "parsed_orders": [],
         "query_results": [],

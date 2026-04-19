@@ -18,23 +18,23 @@ def build_tools(client: AbstractOrdersClient) -> list:
     """Build LangChain tool objects that delegate to the given client."""
 
     @tool
-    def fetch_orders() -> list[str]:
+    def fetch_orders() -> list:
         """Fetch all customer orders. Use for broad queries that filter, aggregate, or compare across many orders."""
-        return [client.fetch_orders()]
+        return client.fetch_orders()
 
     @tool
-    def fetch_order_by_id(order_id: str) -> list[str]:
+    def fetch_order_by_id(order_id: str) -> str:
         """Fetch a single customer order by its ID. Use when the query targets one specific order."""
-        return [client.fetch_order_by_id(order_id)]
+        return client.fetch_order_by_id(order_id)
 
     return [fetch_orders, fetch_order_by_id]
 
 
-class _LangChainAdapter(AbstractLLM):
+class _LangChainOpenAIAdapter(AbstractLLM):
     """Adapts a LangChain chat model to the AbstractLLM interface."""
 
     def __init__(self, model: Any) -> None:
-        self._model = model
+        self._model: ChatOpenAI = model
 
     def invoke(self, messages: list) -> Any:
         return self._model.invoke(messages)
@@ -56,7 +56,7 @@ def build_llm() -> AbstractLLM:
         openai_api_base=OPENROUTER_BASE_URL,
         temperature=0,
     )
-    return _LangChainAdapter(model)
+    return _LangChainOpenAIAdapter(model)
 
 
 def bootstrap(

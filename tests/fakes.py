@@ -2,7 +2,6 @@
 
 Fakes assert on end state, not implementation details — no mock.patch needed.
 """
-import json
 from typing import Any, Optional
 
 from raft_llm.adapters.abstractions import AbstractLLM, AbstractOrdersClient, ToolCall
@@ -40,7 +39,7 @@ class FakeLLM(AbstractLLM):
         self.call_count += 1
         return _FakeResponse(content)
 
-    def invoke_with_tools(self, messages: list, tools: list[dict]) -> ToolCall:
+    def invoke_with_tools(self, messages: list, tools: list) -> ToolCall:
         tool_call = self._tool_call_responses[self.tool_call_count % len(self._tool_call_responses)]
         self.tool_call_count += 1
         return tool_call
@@ -52,19 +51,18 @@ class FakeLLM(AbstractLLM):
 
 
 class FakeOrdersClient(AbstractOrdersClient):
-    """Returns fixed raw response text serialized from a list of order strings."""
+    """Returns raw order strings extracted from the API response envelope."""
 
     def __init__(self, raw_orders: list[str]) -> None:
         self._orders = raw_orders
 
-    def fetch_orders(self, limit: Optional[int] = None) -> str:
-        orders = self._orders[:limit] if limit is not None else self._orders
-        return json.dumps({"status": "ok", "raw_orders": orders})
+    def fetch_orders(self, limit: Optional[int] = None) -> list[str]:
+        return self._orders[:limit] if limit is not None else self._orders
 
     def fetch_order_by_id(self, order_id: str) -> str:
         for order in self._orders:
             if order_id in order:
-                return json.dumps({"status": "ok", "raw_order": order})
+                return order
         raise APIError(f"Order {order_id} not found")
 
 

@@ -16,7 +16,7 @@ class AbstractLLM(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def invoke_with_tools(self, messages: list, tools: list[dict]) -> "ToolCall":
+    def invoke_with_tools(self, messages: list, tools: list) -> "ToolCall":
         """Call the LLM with tool definitions; returns the chosen ToolCall."""
         raise NotImplementedError
 
@@ -28,7 +28,7 @@ class AbstractLLM(abc.ABC):
 
 class AbstractOrdersClient(abc.ABC):
     @abc.abstractmethod
-    def fetch_orders(self, limit: Optional[int] = None) -> str:
+    def fetch_orders(self, limit: Optional[int] = None) -> list:
         raise NotImplementedError
 
     @abc.abstractmethod
