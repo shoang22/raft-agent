@@ -26,8 +26,9 @@ async def main() -> None:
     from src.raft_agent.bootstrap import bootstrap
     from src.raft_agent.service_layer.agent import AgentError
 
-    if len(sys.argv) > 1:
-        query = " ".join(sys.argv[1:])
+    args = [a for a in sys.argv[1:] if a != "--cli"]
+    if args:
+        query = " ".join(args)
     else:
         print("Order Query Agent")
         print("Example: Show me all orders from Ohio with total over 500")
