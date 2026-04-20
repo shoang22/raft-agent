@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from src.raft_agent.adapters.abstractions import AbstractLLM, AbstractOrdersClient, ToolCall
+from src.raft_agent.adapters.abstractions import AbstractLLM, AbstractOrdersClient, AbstractProgressReporter, ToolCall
 from src.raft_agent.adapters.orders_client import APIError
 from src.raft_agent.adapters.repository import (
     AbstractTrainingRepository,
@@ -144,6 +144,16 @@ class FakeErrorOrdersClient(AbstractOrdersClient):
 
     async def fetch_order_by_id(self, order_id: str) -> str:
         raise APIError(self._message)
+
+
+class FakeProgressReporter(AbstractProgressReporter):
+    """Records reported messages so tests can assert on them."""
+
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    async def report(self, message: str) -> None:
+        self.messages.append(message)
 
 
 class FakeTotalPredictor:

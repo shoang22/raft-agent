@@ -1,4 +1,5 @@
 """LLM-powered parsing for order data."""
+import asyncio
 import logging
 import re
 from enum import Enum
@@ -23,6 +24,9 @@ _SQL_SYSTEM = (
     "  orders(order_id TEXT, buyer TEXT, state TEXT, total REAL)\n\n"
     "IMPORTANT: the 'state' column stores 2-letter uppercase US state abbreviations (e.g. 'OH' for Ohio, "
     "'CA' for California, 'TX' for Texas). Always use abbreviations in WHERE clauses, never full state names.\n\n"
+    "IMPORTANT: every result row must include all four columns — order_id, buyer, state, total. "
+    "If you need aggregations (MAX, SUM, COUNT), use a subquery or JOIN so the four columns still appear per row. "
+    "Never return a result that omits any of these columns.\n\n"
     "Return ONLY the SQL query — no explanation, no markdown, no code blocks."
 )
 
@@ -84,7 +88,10 @@ async def direct_extraction(query: str, llm: AbstractLLM, max_retries: int = 3) 
 
             try:
                 partial_order = await llm.invoke_structured(
-                    [{"role": "user", "content": prompt}],
+                    [
+                        {"role": "system", "content": "You are a precise data extractor. Return only values explicitly present in the text."},
+                        {"role": "user", "content": prompt},
+                    ],
                     OrderChunk,
                 )
                 for k, v in partial_order.model_dump(exclude={"last_field"}).items():
@@ -153,10 +160,10 @@ async def parse_raw_orders(
     if not raw_orders:
         return []
 
-    all_orders: list[Order] = []
-    for order in raw_orders:
-        logger.info("Parsing order: %s", order)
-        all_orders.append(await direct_extraction(order, llm))
+    logger.info("Parsing %d orders concurrently", len(raw_orders))
+    all_orders = list(
+        await asyncio.gather(*(direct_extraction(order, llm) for order in raw_orders))
+    )
 
     return _impute_totals(all_orders, predictor)
 

@@ -1,13 +1,13 @@
 """Composition root — assembles concrete dependencies and wires the application."""
 import os
-from typing import Any
+from typing import Any, Optional
 
 import tiktoken
 from langchain_core.tools import tool
 from langchain_openrouter import ChatOpenRouter
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from src.raft_agent.adapters.abstractions import AbstractLLM, AbstractOrdersClient, ToolCall
+from src.raft_agent.adapters.abstractions import AbstractLLM, AbstractOrdersClient, AbstractProgressReporter, ToolCall
 from src.raft_agent.adapters.ml_model import AbstractTotalPredictor, LinearRegressionTotalPredictor
 from src.raft_agent.adapters.orders_client import OrdersAPIClient
 from src.raft_agent.adapters.unit_of_work import DEFAULT_TRAINING_DB_URL, SqlAlchemyUnitOfWork
@@ -76,6 +76,7 @@ def bootstrap(
     llm: AbstractLLM = None,
     predictor: AbstractTotalPredictor = None,
     training_db_url: str = None,
+    reporter: AbstractProgressReporter = None,
 ):
     """Return a configured async run_agent callable with all dependencies wired up.
 
@@ -84,20 +85,24 @@ def bootstrap(
     engine is created per call so each agent run starts with a clean query table.
     Pass fake/stub implementations to override defaults (useful in tests).
     """
+    from src.raft_agent.adapters.progress import CLIProgressReporter
+
     resolved_client = client if client is not None else OrdersAPIClient()
     resolved_llm = llm if llm is not None else build_llm()
     resolved_predictor = predictor if predictor is not None else LinearRegressionTotalPredictor()
+    resolved_reporter = reporter if reporter is not None else CLIProgressReporter()
 
     db_url = training_db_url or DEFAULT_TRAINING_DB_URL
     training_engine = create_async_engine(db_url)
 
-    async def _run(query: str) -> dict:
+    async def _run(query: str, *, reporter: Optional[AbstractProgressReporter] = None) -> dict:
         return await run_agent(
             query,
             tools=build_tools(resolved_client),
             llm=resolved_llm,
             uow=SqlAlchemyUnitOfWork(training_engine=training_engine),
             predictor=resolved_predictor,
+            reporter=reporter if reporter is not None else resolved_reporter,
         )
 
     return _run

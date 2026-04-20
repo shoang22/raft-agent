@@ -4,7 +4,7 @@ from typing import Optional, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from src.raft_agent.adapters.abstractions import AbstractLLM, ToolCall
+from src.raft_agent.adapters.abstractions import AbstractLLM, AbstractProgressReporter, ToolCall
 from src.raft_agent.adapters.ml_model import AbstractTotalPredictor
 from src.raft_agent.adapters.orders_client import APIError
 from src.raft_agent.adapters.unit_of_work import AbstractUnitOfWork
@@ -127,26 +127,55 @@ def create_graph(
     tools: list,
     uow: AbstractUnitOfWork,
     predictor: Optional[AbstractTotalPredictor] = None,
+    reporter: Optional[AbstractProgressReporter] = None,
 ):
+    from src.raft_agent.adapters.progress import NullProgressReporter
+
+    effective_reporter: AbstractProgressReporter = reporter or NullProgressReporter()
     builder = StateGraph(AgentState)
 
     async def fetch(state):
-        return await _fetch_node(state, llm, tools)
+        await effective_reporter.report("Fetching orders...")
+        result = await _fetch_node(state, llm, tools)
+        if not result.get("error"):
+            n = len(result.get("raw_orders", []))
+            await effective_reporter.report(f"Fetched {n} order(s).")
+        return result
 
     async def parse(state):
-        return await _parse_node(state, llm, predictor)
+        if not state.get("error"):
+            await effective_reporter.report(f"Parsing {len(state['raw_orders'])} raw order(s)...")
+        result = await _parse_node(state, llm, predictor)
+        if "parsed_orders" in result:
+            await effective_reporter.report(f"Parsed {len(result['parsed_orders'])} order(s).")
+        return result
 
     async def store(state):
-        return await _store_node(state, uow, predictor)
+        if not state.get("error"):
+            n = len([o for o in state["parsed_orders"] if o.total is not None])
+            await effective_reporter.report(f"Storing {n} order(s)...")
+        result = await _store_node(state, uow, predictor)
+        if not result.get("error"):
+            await effective_reporter.report("Orders stored.")
+        return result
 
     async def query(state):
-        return await _query_node(state, llm, uow)
+        if not state.get("error"):
+            await effective_reporter.report("Generating SQL query...")
+        result = await _query_node(state, llm, uow)
+        if "query_results" in result:
+            await effective_reporter.report(f"Query returned {len(result['query_results'])} result(s).")
+        return result
+
+    async def format_single(state):
+        await effective_reporter.report("Formatting single order result.")
+        return _format_single_node(state)
 
     builder.add_node("fetch", fetch)
     builder.add_node("parse", parse)
     builder.add_node("store", store)
     builder.add_node("query", query)
-    builder.add_node("format_single", _format_single_node)
+    builder.add_node("format_single", format_single)
 
     builder.add_edge(START, "fetch")
     builder.add_conditional_edges("fetch", _should_continue, {"continue": "parse", "error": END})
@@ -169,13 +198,14 @@ async def run_agent(
     llm: AbstractLLM,
     uow: AbstractUnitOfWork,
     predictor: Optional[AbstractTotalPredictor] = None,
+    reporter: Optional[AbstractProgressReporter] = None,
 ) -> dict:
     """Run the order-querying agent and return clean JSON-serializable output.
 
     Raises AgentError on API failures or unrecoverable LLM errors.
     """
     logger.info("Agent starting for query: %r", query)
-    graph = create_graph(llm, tools, uow, predictor=predictor)
+    graph = create_graph(llm, tools, uow, predictor=predictor, reporter=reporter)
 
     initial_state: AgentState = {
         "query": query,

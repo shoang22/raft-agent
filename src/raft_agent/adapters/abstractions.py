@@ -42,3 +42,9 @@ class AbstractOrdersClient(abc.ABC):
     @abc.abstractmethod
     async def fetch_order_by_id(self, order_id: str) -> str:
         raise NotImplementedError
+
+
+class AbstractProgressReporter(abc.ABC):
+    @abc.abstractmethod
+    async def report(self, message: str) -> None:
+        raise NotImplementedError

@@ -9,7 +9,8 @@ from src.raft_agent.adapters.abstractions import ToolCall
 from src.raft_agent.bootstrap import bootstrap
 from src.raft_agent.domain.models import Order, USState
 from src.raft_agent.service_layer.parsers import OrderChunk, OrderField
-from tests.fakes import FakeLLM, FakeOrdersClient, FakeTotalPredictor
+from src.raft_agent.adapters.progress import NullProgressReporter
+from tests.fakes import FakeLLM, FakeOrdersClient, FakeProgressReporter, FakeTotalPredictor
 
 _RAW_ORDERS = [
     "Order 1001: Buyer=John Davis, Location=Columbus, OH, Total=$742.10, Items: laptop",
@@ -26,7 +27,7 @@ _PARSED_1002 = OrderChunk(
 )
 
 
-def _make_run(query: str = "show all orders"):
+def _make_run(query: str = "show all orders", reporter=None):
     llm = FakeLLM(
         responses=["SELECT * FROM orders"],
         tool_call_responses=[ToolCall(name="fetch_orders")],
@@ -39,6 +40,7 @@ def _make_run(query: str = "show all orders"):
         llm=llm,
         predictor=predictor,
         training_db_url="sqlite+aiosqlite:///:memory:",
+        reporter=reporter if reporter is not None else NullProgressReporter(),
     )
     return run, llm, predictor
 
@@ -67,3 +69,11 @@ async def test_bootstrap_triggers_predictor_retrain():
     await run("show all orders")
     assert predictor.retrain_call_count == 1
     assert len(predictor.last_retrain_orders) == 2
+
+
+async def test_bootstrap_reporter_receives_messages():
+    reporter = FakeProgressReporter()
+    run, _, _ = _make_run(reporter=reporter)
+    await run("show all orders")
+    assert len(reporter.messages) > 0
+    assert any("Fetching" in m for m in reporter.messages)

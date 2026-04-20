@@ -15,7 +15,7 @@ from src.raft_agent.service_layer.parsers import (
     OrderField,
     ParseError,
 )
-from tests.fakes import FakeLLM, FakeOrdersClient, FakeErrorOrdersClient, FakeUnitOfWork
+from tests.fakes import FakeLLM, FakeOrdersClient, FakeErrorOrdersClient, FakeProgressReporter, FakeUnitOfWork
 
 SAMPLE_RAW_ORDERS = [
     "Order 1001: Buyer=John Davis, Location=Columbus, OH, Total=$742.10, Items: laptop",
@@ -61,6 +61,27 @@ class TestParseRawOrders:
         llm = FakeLLM(responses=[], structured_responses=[chunk])
         orders = await parse_raw_orders(["#2001 | Jane | Texas TX | 99.99 USD"], llm)
         assert len(orders) == 1
+
+
+class TestOrderSchema:
+    def test_field_descriptions_in_json_schema(self):
+        props = Order.model_json_schema()["properties"]
+        for field in ("orderId", "buyer", "state", "total"):
+            assert "description" in props[field], f"Order.{field} missing schema description"
+
+
+class TestDirectExtractionSystemMessage:
+    async def test_sends_system_message_as_first_role(self):
+        chunk = OrderChunk(orderId="1001", buyer="John Davis", state="OH", total=742.10, last_field=OrderField.total)
+        llm = FakeLLM(responses=[], structured_responses=[chunk])
+        await direct_extraction(
+            "Order 1001: Buyer=John Davis, Location=Columbus, OH, Total=$742.10",
+            llm,
+        )
+        messages = llm.structured_messages_log[0]
+        roles = [m["role"] for m in messages]
+        assert roles[0] == "system"
+        assert roles[1] == "user"
 
 
 class TestGenerateSqlQuery:
@@ -367,10 +388,10 @@ class TestDirectExtraction:
         assert order.total == 512.00
 
     async def test_multi_chunk_concatenates_split_buyer(self):
-        # context_window=746 → chunk_size=(746-608-132)//2=3, so 6-word query splits into 2 chunks of ≤3 words
+        # context_window=934 → chunk_size=(934-741-186)//2=3, so 6-word query splits into 2 chunks of ≤3 words
         chunk1 = OrderChunk(orderId="1005", buyer="Chris", last_field=OrderField.buyer)
         chunk2 = OrderChunk(buyer="Myers", state="OH", total=512.00, last_field=OrderField.total)
-        llm = FakeLLM(responses=[], structured_responses=[chunk1, chunk2], context_window=746)
+        llm = FakeLLM(responses=[], structured_responses=[chunk1, chunk2], context_window=934)
         order = await direct_extraction("Order 1005 Buyer=Chris Myers Location=OH Total=512.00", llm)
         assert order.orderId == "1005"
         assert order.buyer == "Chris Myers"
@@ -379,11 +400,11 @@ class TestDirectExtraction:
         assert llm.structured_call_count == 2
 
     async def test_none_fields_in_later_chunk_do_not_overwrite(self):
-        # context_window=744 → chunk_size=(744-608-132)//2=2, so 4-word query splits into 2 chunks of ≤2 words
+        # context_window=932 → chunk_size=(932-741-186)//2=2, so 4-word query splits into 2 chunks of ≤2 words
         # chunk1 sets state=OH; chunk2 omits state (None) — verifies None doesn't overwrite the accumulated value
         chunk1 = OrderChunk(orderId="1005", buyer="Chris", state="OH", last_field=OrderField.buyer)
         chunk2 = OrderChunk(buyer="Myers", last_field=OrderField.buyer)
-        llm = FakeLLM(responses=[], structured_responses=[chunk1, chunk2], context_window=744)
+        llm = FakeLLM(responses=[], structured_responses=[chunk1, chunk2], context_window=932)
         order = await direct_extraction("Order=1005 Buyer=Chris OH Myers", llm)
         assert order.orderId == "1005"
         assert order.buyer == "Chris Myers"
@@ -460,7 +481,7 @@ class TestDirectExtractionRetries:
         err = ValueError("bad structured output")
         llm = FakeLLM(responses=[], structured_responses=[err, _ORDER_1005], context_window=100_000)
         await direct_extraction(_RETRY_QUERY, llm, max_retries=3)
-        retry_prompt = llm.structured_messages_log[1][0]["content"]
+        retry_prompt = llm.structured_messages_log[1][1]["content"]
         assert "Previous Attempt Errors" in retry_prompt
         assert "bad structured output" in retry_prompt
 
@@ -499,6 +520,74 @@ class TestDirectExtractionRetries:
         )
         with pytest.raises(ParseError, match="too large"):
             await direct_extraction("Buyer John Location OH Total", llm, max_retries=2)
+
+
+class TestProgressReporting:
+    async def _run(self, query, client, llm, reporter, predictor=None):
+        return await run_agent(
+            query,
+            tools=build_tools(client),
+            llm=llm,
+            uow=FakeUnitOfWork(),
+            predictor=predictor,
+            reporter=reporter,
+        )
+
+    async def test_bulk_path_emits_all_stage_messages(self):
+        client = FakeOrdersClient(SAMPLE_RAW_ORDERS[:1])
+        llm = FakeLLM(
+            responses=["SELECT * FROM orders"],
+            tool_call_responses=[_TOOL_FETCH_ALL],
+            structured_responses=[_ORDER_1001],
+        )
+        reporter = FakeProgressReporter()
+
+        await self._run("all orders", client, llm, reporter)
+
+        assert any("Fetching" in m for m in reporter.messages)
+        assert any("Fetched" in m for m in reporter.messages)
+        assert any("Parsing" in m for m in reporter.messages)
+        assert any("Parsed" in m for m in reporter.messages)
+        assert any("Storing" in m for m in reporter.messages)
+        assert any("stored" in m.lower() for m in reporter.messages)
+        assert any("SQL" in m for m in reporter.messages)
+        assert any("result" in m.lower() for m in reporter.messages)
+
+    async def test_single_order_path_emits_format_message_not_store(self):
+        client = FakeOrdersClient(SAMPLE_RAW_ORDERS)
+        llm = FakeLLM(
+            responses=[],
+            tool_call_responses=[_TOOL_FETCH_1001],
+            structured_responses=[_ORDER_1001],
+        )
+        reporter = FakeProgressReporter()
+
+        await self._run("show me order 1001", client, llm, reporter)
+
+        assert any("Formatting" in m for m in reporter.messages)
+        assert not any("Storing" in m for m in reporter.messages)
+        assert not any("SQL" in m for m in reporter.messages)
+
+    async def test_fetch_error_suppresses_downstream_messages(self):
+        client = FakeErrorOrdersClient("timeout")
+        llm = FakeLLM(responses=[], tool_call_responses=[_TOOL_FETCH_ALL])
+        reporter = FakeProgressReporter()
+
+        with pytest.raises(AgentError):
+            await self._run("any query", client, llm, reporter)
+
+        assert any("Fetching" in m for m in reporter.messages)
+        assert not any("Parsing" in m for m in reporter.messages)
+
+    async def test_no_reporter_passed_does_not_raise(self):
+        client = FakeOrdersClient(SAMPLE_RAW_ORDERS[:1])
+        llm = FakeLLM(
+            responses=["SELECT * FROM orders"],
+            tool_call_responses=[_TOOL_FETCH_ALL],
+            structured_responses=[_ORDER_1001],
+        )
+        result = await run_agent("all orders", tools=build_tools(client), llm=llm, uow=FakeUnitOfWork())
+        assert "orders" in result
 
 
 class TestChunkSizeFormula:
