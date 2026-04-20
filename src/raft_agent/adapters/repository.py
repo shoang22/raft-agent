@@ -11,6 +11,7 @@ from sqlalchemy import Column, Float, MetaData, String, Table, text
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from src.raft_agent.domain.models import Order
+from src.raft_agent.service_layer.parsers import normalize_sql_quotes
 
 # ---------------------------------------------------------------------------
 # Ephemeral table (in-memory, per-run)
@@ -73,6 +74,7 @@ class SqlAlchemyOrderRepository(AbstractOrderRepository):
         )
 
     async def execute_query(self, sql: str) -> list[dict]:
+        sql = normalize_sql_quotes(sql)
         if not sql.strip().upper().startswith("SELECT"):
             raise ValueError(f"Only SELECT queries are permitted, got: {sql!r}")
         result = await self._conn.execute(text(sql))

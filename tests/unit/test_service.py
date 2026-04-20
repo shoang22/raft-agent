@@ -81,6 +81,23 @@ class TestGenerateSqlQuery:
         sql = await generate_sql_query("all orders", llm)
         assert sql == "SELECT * FROM orders"
 
+    async def test_normalizes_typographic_single_quotes(self):
+        llm = FakeLLM(["SELECT order_id, buyer, state, total FROM orders WHERE buyer = \u2018Mike Turner\u2019"])
+        sql = await generate_sql_query("orders by Mike Turner", llm)
+        assert sql == "SELECT order_id, buyer, state, total FROM orders WHERE buyer = 'Mike Turner'"
+
+    async def test_normalizes_typographic_double_quotes(self):
+        llm = FakeLLM(['SELECT order_id, buyer, state, total FROM orders WHERE state = \u201cOH\u201d'])
+        sql = await generate_sql_query("orders from Ohio", llm)
+        assert sql == 'SELECT order_id, buyer, state, total FROM orders WHERE state = "OH"'
+
+    async def test_normalizes_angle_quotation_marks_to_single_quotes(self):
+        # U+2039/U+203A are single-quote-like; previously misclassified as double quotes,
+        # producing mismatched SQL string delimiters (e.g. 'mike").
+        llm = FakeLLM(["SELECT order_id, buyer, state, total FROM orders WHERE buyer = \u2039mike\u203a"])
+        sql = await generate_sql_query("orders from mike", llm)
+        assert sql == "SELECT order_id, buyer, state, total FROM orders WHERE buyer = 'mike'"
+
     async def test_non_select_raises_parse_error(self):
         llm = FakeLLM(["DROP TABLE orders"])
         with pytest.raises(ParseError):
@@ -90,6 +107,16 @@ class TestGenerateSqlQuery:
         llm = FakeLLM(["not sql at all"])
         with pytest.raises(ParseError):
             await generate_sql_query("some query", llm, max_retries=2)
+
+    async def test_retry_injects_error_feedback(self):
+        bad = "DROP TABLE orders"
+        good = "SELECT order_id, buyer, state, total FROM orders WHERE buyer = 'mike'"
+        llm = FakeLLM([bad, good])
+        sql = await generate_sql_query("orders from mike", llm, max_retries=2)
+        assert sql == good
+        retry_user_msg = llm.messages_log[1][-1]["content"]
+        assert bad in retry_user_msg
+        assert "Previous Attempt Errors" in retry_user_msg
 
 
 _ORDER_1001 = OrderChunk(orderId="1001", buyer="John Davis", state="OH", total=742.10, last_field=OrderField.total)

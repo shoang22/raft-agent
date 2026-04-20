@@ -17,11 +17,57 @@ _PARSE_CHUNK_TEMPLATE = (Path(__file__).parent / "prompts" / "parse_order_chunk.
 
 logger = logging.getLogger(__name__)
 
+# Maps every Unicode quote-lookalike to its ASCII equivalent.
+_SINGLE_QUOTE_CHARS = (
+    "\u0060"  # GRAVE ACCENT
+    "\u00b4"  # ACUTE ACCENT
+    "\u02b9"  # MODIFIER LETTER PRIME
+    "\u02bb"  # MODIFIER LETTER TURNED COMMA
+    "\u02bc"  # MODIFIER LETTER APOSTROPHE
+    "\u02bd"  # MODIFIER LETTER REVERSED COMMA
+    "\u02be"  # MODIFIER LETTER RIGHT HALF RING
+    "\u02bf"  # MODIFIER LETTER LEFT HALF RING
+    "\u2018"  # LEFT SINGLE QUOTATION MARK
+    "\u2019"  # RIGHT SINGLE QUOTATION MARK
+    "\u201a"  # SINGLE LOW-9 QUOTATION MARK
+    "\u201b"  # SINGLE HIGH-REVERSED-9 QUOTATION MARK
+    "\u2032"  # PRIME
+    "\u2035"  # REVERSED PRIME
+    "\u2039"  # SINGLE LEFT-POINTING ANGLE QUOTATION MARK
+    "\u203a"  # SINGLE RIGHT-POINTING ANGLE QUOTATION MARK
+    "\u055a"  # ARMENIAN APOSTROPHE
+    "\u05f3"  # HEBREW PUNCTUATION GERESH
+    "\uff07"  # FULLWIDTH APOSTROPHE
+)
+_DOUBLE_QUOTE_CHARS = (
+    "\u00ab"  # LEFT-POINTING DOUBLE ANGLE QUOTATION MARK
+    "\u00bb"  # RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK
+    "\u201c"  # LEFT DOUBLE QUOTATION MARK
+    "\u201d"  # RIGHT DOUBLE QUOTATION MARK
+    "\u201e"  # DOUBLE LOW-9 QUOTATION MARK
+    "\u201f"  # DOUBLE HIGH-REVERSED-9 QUOTATION MARK
+    "\u2033"  # DOUBLE PRIME
+    "\u2036"  # REVERSED DOUBLE PRIME
+    "\uff02"  # FULLWIDTH QUOTATION MARK
+)
+_QUOTE_TABLE = str.maketrans(
+    _SINGLE_QUOTE_CHARS + _DOUBLE_QUOTE_CHARS,
+    "'" * len(_SINGLE_QUOTE_CHARS) + '"' * len(_DOUBLE_QUOTE_CHARS),
+)
 
-_SQL_SYSTEM = (
+
+def normalize_sql_quotes(sql: str) -> str:
+    """Replace Unicode typographic quote variants with ASCII quote characters."""
+    return sql.translate(_QUOTE_TABLE)
+
+
+
+_SQL_SCHEMA_DEFAULT = "orders(order_id TEXT, buyer TEXT, state TEXT, total REAL)"
+
+_SQL_SYSTEM_TEMPLATE = (
     "You are a SQL query generator. Given a natural language query about customer orders, "
     "generate a valid SQLite SELECT query against the following table:\n\n"
-    "  orders(order_id TEXT, buyer TEXT, state TEXT, total REAL)\n\n"
+    "  {schema}\n\n"
     "IMPORTANT: the 'state' column stores 2-letter uppercase US state abbreviations (e.g. 'OH' for Ohio, "
     "'CA' for California, 'TX' for Texas). Always use abbreviations in WHERE clauses, never full state names.\n\n"
     "IMPORTANT: every result row must include all four columns — order_id, buyer, state, total. "
@@ -231,22 +277,43 @@ def chunk_by_words(text: str, chunk_size: int, llm: AbstractLLM) -> list[str]:
     return chunks
 
 
-async def generate_sql_query(query: str, llm: AbstractLLM, max_retries: int = 3) -> str:
+async def generate_sql_query(
+    query: str,
+    llm: AbstractLLM,
+    max_retries: int = 3,
+    schema: str = _SQL_SCHEMA_DEFAULT,
+) -> str:
     """Use the LLM to translate a natural language query into a SQL SELECT statement."""
+    system_prompt = _SQL_SYSTEM_TEMPLATE.format(schema=schema)
+    error_history: list[tuple[str, str]] = []  # (bad_sql, error_message)
     for attempt in range(1, max_retries + 1):
+        messages: list[dict] = [{"role": "system", "content": system_prompt}]
+        user_content = query
+        if error_history:
+            corrections = "\n\n".join(
+                f"Attempt {i + 1} produced invalid SQL:\n{bad_sql}\nError: {err}"
+                for i, (bad_sql, err) in enumerate(error_history)
+            )
+            user_content = (
+                f"{query}\n\n## Previous Attempt Errors\n\n"
+                f"Adjust your response to avoid these:\n\n{corrections}"
+            )
+        messages.append({"role": "user", "content": user_content})
+        bad_sql = ""
         try:
-            response = await llm.invoke([
-                {"role": "system", "content": _SQL_SYSTEM},
-                {"role": "user", "content": query},
-            ])
-            sql = response.content.strip()
-            sql = re.sub(r"^```(?:sql)?\s*", "", sql)
-            sql = re.sub(r"\s*```$", "", sql).strip()
+            response = await llm.invoke(messages)
+            bad_sql = response.content.strip()
+            logger.info(f"SQL generated: {bad_sql}")
+            bad_sql = re.sub(r"^```(?:sql)?\s*", "", bad_sql)
+            bad_sql = re.sub(r"\s*```$", "", bad_sql).strip()
+            sql = normalize_sql_quotes(bad_sql)
+            logger.info(f"SQL final: {sql}")
             if not sql.upper().startswith("SELECT"):
                 raise ParseError(f"LLM returned non-SELECT query: {sql!r}")
             return sql
         except ParseError as e:
             logger.warning("Attempt %d/%d: SQL generation failed: %s", attempt, max_retries, e)
+            error_history.append((bad_sql, str(e)))
             if attempt == max_retries:
                 raise
     raise ParseError("Unreachable")

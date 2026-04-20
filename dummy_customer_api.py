@@ -11,7 +11,7 @@ ORDERS = [
     "Order 1003: Buyer=Mike Turner, Location=Cleveland, OH, Total=$1299.99, Items: gaming pc, mouse",
     "Order 1004: Buyer=Rachel Kim, Location=Seattle, WA, Total=$89.50, Items: coffee maker",
     "Order 1005: Buyer=Chris Myers, Location=Cincinnati, OH, Total=$512.00, Items: monitor, desk lamp",
-    "Order 10020: Buyer=Steven Hoang, Location=Springfield, VA, Items: gpu" # for testing linar regression model
+    # "Order 10020: Buyer=Steven Hoang, Location=Springfield, VA, Items: gpu" # for testing linar regression model
 ]
 
 @app.route("/api/orders", methods=["GET"])

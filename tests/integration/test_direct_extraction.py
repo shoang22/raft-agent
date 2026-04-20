@@ -23,11 +23,11 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.mark.skip()
+@pytest.mark.skip("High token cost")
 async def test_long_order_is_chunked_and_parsed():
     """Order text longer than chunk_size triggers multi-chunk parsing; merged result is correct."""
     llm = build_llm()
-    context_window = 51736 // 2
+    context_window = 51736
     long_items = ", ".join([f"item{i}" for i in range(context_window)])
     long_order = (
         "Order 1001: Buyer=John Davis, Location=Columbus, OH, Total=$742.10, "
