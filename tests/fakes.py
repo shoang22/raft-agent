@@ -43,6 +43,7 @@ class FakeLLM(AbstractLLM):
         self.call_count = 0
         self.tool_call_count = 0
         self.structured_call_count = 0
+        self.structured_messages_log: list[list] = []
 
     async def invoke(self, messages: list) -> _FakeResponse:
         content = self._responses[self.call_count % len(self._responses)]
@@ -55,8 +56,11 @@ class FakeLLM(AbstractLLM):
         return tool_call
 
     async def invoke_structured(self, messages: list, schema: type) -> Any:
+        self.structured_messages_log.append(messages)
         obj = self._structured_responses[self.structured_call_count % len(self._structured_responses)]
         self.structured_call_count += 1
+        if isinstance(obj, Exception):
+            raise obj
         return obj
 
     def count_tokens(self, text: str) -> int:

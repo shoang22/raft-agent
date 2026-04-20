@@ -62,9 +62,13 @@ class USState(str, Enum):
 
 class Order(BaseModel):
     orderId: str | None = None
+    """Unique order identifier (e.g. 'ORD-1042'). Null if unknown."""
     buyer: str | None = None
+    """Full name of the customer who placed the order (e.g. 'Jane Smith'). Null if unknown."""
     state: USState | None = None
+    """Two-letter US state code for the shipping destination (e.g. 'CA'). Null if unknown."""
     total: float | None = None
+    """Order total in USD, rounded to two decimal places (e.g. 149.99). Null if unknown."""
 
     @field_validator("total")
     @classmethod

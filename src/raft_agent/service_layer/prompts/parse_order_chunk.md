@@ -49,7 +49,7 @@ Ignore any fields in the input that do not correspond to any Order field.
 
 ### Example 1 — value split across chunks
 
-**Original text:** `Order #1234, buyer: John Smith, state: Ohio, total: 450.00`
+**Original text:** `Order #1234, buyer: John Smith, state: Cleveland, Ohio, total: 450.00`
 
 ---
 

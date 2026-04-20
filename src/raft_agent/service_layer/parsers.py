@@ -38,7 +38,18 @@ class OrderChunk(Order):
     last_field: OrderField = Field(..., description="The name of the last field successfully parsed from this order. Used for combining chunked orders.")
 
 
-async def direct_extraction(query: str, llm: AbstractLLM) -> Order:
+def _build_parse_prompt(last_field: str, chunk: str, error_history: list[str]) -> str:
+    prompt = _PARSE_CHUNK_TEMPLATE.replace("{last_field}", last_field).replace("{chunk}", chunk)
+    if error_history:
+        lines = "\n\n".join(f"Attempt {i + 1} error: {e}" for i, e in enumerate(error_history))
+        prompt += (
+            f"\n\n## Previous Attempt Errors\n\n"
+            f"The following errors occurred on previous attempts. Adjust your response to avoid them:\n\n{lines}"
+        )
+    return prompt
+
+
+async def direct_extraction(query: str, llm: AbstractLLM, max_retries: int = 3) -> Order:
     n_tokens_prompt = llm.count_tokens(_PARSE_CHUNK_TEMPLATE)
     n_tokens_schema = llm.count_tokens(str(OrderChunk.model_json_schema()))
     chunk_size = (llm.context_window - n_tokens_prompt - n_tokens_schema) // 2
@@ -50,40 +61,64 @@ async def direct_extraction(query: str, llm: AbstractLLM) -> Order:
         )
     chunks = chunk_by_words(query, chunk_size=chunk_size, llm=llm)
     logger.info(f"Created {len(chunks)} chunks.")
-    last_field = "null"
-    order = Order()
-    for chunk in chunks:
-        chunk_tokens = llm.count_tokens(chunk)
-        if chunk_tokens > chunk_size:
-            raise ParseError(f"Chunk exceeds chunk_size (count: {chunk_tokens} - limit: {chunk_size}): {chunk!r}")
+    prompt_budget = n_tokens_prompt + chunk_size
 
-        prompt = _PARSE_CHUNK_TEMPLATE.replace("{last_field}", last_field).replace("{chunk}", chunk)
-        partial_order = await llm.invoke_structured(
-            [{"role": "user", "content": prompt}],
-            OrderChunk,
-        )
-        last_field = partial_order.last_field.value
-        order = _merge_partial(order, partial_order)
+    error_history: list[str] = []
+    for attempt in range(1, max_retries + 1):
+        last_field = "null"
+        order = Order()
+        attempt_error: Exception | None = None
 
-    # Confirm that all parsed values are actually present in the original query to catch parsing errors
-    for k, v in order.model_dump().items():
-        if v is None:
-            continue
-        if isinstance(v, Enum):
-            v = v.value
-        candidates = {str(v)}
-        if isinstance(v, float):
-            candidates.add(f"{v:g}")
-        if not any(c in query for c in candidates):
-            raise ParseError(f"Parsed value {v!r} for field {k} not found in original query: {query!r}")
-    required = ("orderId", "buyer", "state")
-    if all(getattr(order, f) is not None for f in required):
-        try:
-            OrderStrict.model_validate(order.model_dump())
-        except ValidationError as e:
-            raise ParseError(f"Invalid model result: {order}") from e
+        for chunk in chunks:
+            chunk_tokens = llm.count_tokens(chunk)
+            if chunk_tokens > chunk_size:
+                raise ParseError(f"Chunk exceeds chunk_size (count: {chunk_tokens} - limit: {chunk_size}): {chunk!r}")
 
-    return order
+            prompt = _build_parse_prompt(last_field, chunk, error_history)
+            n_tokens_full = llm.count_tokens(prompt)
+            if n_tokens_full > prompt_budget:
+                raise ParseError(
+                    f"Retry prompt too large for context window on attempt {attempt} "
+                    f"({n_tokens_full} tokens > {prompt_budget} prompt budget)"
+                )
+
+            try:
+                partial_order = await llm.invoke_structured(
+                    [{"role": "user", "content": prompt}],
+                    OrderChunk,
+                )
+                for k, v in partial_order.model_dump(exclude={"last_field"}).items():
+                    if v is None:
+                        continue
+                    if isinstance(v, Enum):
+                        v = v.value
+                    candidates = {str(v)}
+                    if isinstance(v, float):
+                        candidates.add(f"{v:g}")
+                    if not any(c in query for c in candidates):
+                        raise ParseError(
+                            f"Parsed value {v!r} for field {k} not found in original query: {query!r}"
+                        )
+            except Exception as e:
+                logger.warning("Extraction attempt %d/%d failed on chunk: %s", attempt, max_retries, e)
+                attempt_error = e
+                break
+
+            last_field = partial_order.last_field.value
+            order = _merge_partial(order, partial_order)
+
+        if attempt_error is None:
+            try:
+                OrderStrict.model_validate(order.model_dump())
+                return order
+            except ValidationError:
+                attempt_error = ParseError(f"Invalid model result: {order}")
+
+        error_history.append(str(attempt_error))
+        logger.warning("Extraction attempt %d/%d failed: %s", attempt, max_retries, attempt_error)
+        if attempt == max_retries:
+            raise ParseError(f"Failed to extract after {max_retries} attempts") from attempt_error
+    raise ParseError("Unreachable")
 
 
 def _merge_partial(base: Order, partial: OrderChunk) -> Order:

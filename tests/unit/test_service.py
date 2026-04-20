@@ -89,6 +89,8 @@ _ORDER_1001 = OrderChunk(orderId="1001", buyer="John Davis", state="OH", total=7
 _ORDER_1002 = OrderChunk(orderId="1002", buyer="Sarah Liu", state="TX", total=156.55, last_field=OrderField.total)
 _ORDER_1003 = OrderChunk(orderId="1003", buyer="Mike Turner", state="OH", total=1299.99, last_field=OrderField.total)
 _ORDER_1005 = OrderChunk(orderId="1005", buyer="Chris Myers", state="OH", total=512.00, last_field=OrderField.total)
+_ORDER_1005_HALLUCINATED = OrderChunk(orderId="1005", buyer="Hallucinated Name", state="OH", total=512.00, last_field=OrderField.total)
+_ORDER_1005_INCOMPLETE = OrderChunk(orderId="1005", last_field=OrderField.orderId)
 _ORDERS_SAMPLE = [_ORDER_1001, _ORDER_1002, _ORDER_1003, _ORDER_1005]
 
 
@@ -365,10 +367,10 @@ class TestDirectExtraction:
         assert order.total == 512.00
 
     async def test_multi_chunk_concatenates_split_buyer(self):
-        # context_window=745 → chunk_size=(745-607-132)//2=3, so 6-word query splits into 2 chunks of ≤3 words
+        # context_window=746 → chunk_size=(746-608-132)//2=3, so 6-word query splits into 2 chunks of ≤3 words
         chunk1 = OrderChunk(orderId="1005", buyer="Chris", last_field=OrderField.buyer)
         chunk2 = OrderChunk(buyer="Myers", state="OH", total=512.00, last_field=OrderField.total)
-        llm = FakeLLM(responses=[], structured_responses=[chunk1, chunk2], context_window=745)
+        llm = FakeLLM(responses=[], structured_responses=[chunk1, chunk2], context_window=746)
         order = await direct_extraction("Order 1005 Buyer=Chris Myers Location=OH Total=512.00", llm)
         assert order.orderId == "1005"
         assert order.buyer == "Chris Myers"
@@ -377,13 +379,16 @@ class TestDirectExtraction:
         assert llm.structured_call_count == 2
 
     async def test_none_fields_in_later_chunk_do_not_overwrite(self):
-        # context_window=743 → chunk_size=(743-607-132)//2=2, so 4-word query splits into 2 chunks of ≤2 words
-        chunk1 = OrderChunk(orderId="1005", buyer="Chris", last_field=OrderField.buyer)
+        # context_window=744 → chunk_size=(744-608-132)//2=2, so 4-word query splits into 2 chunks of ≤2 words
+        # chunk1 sets state=OH; chunk2 omits state (None) — verifies None doesn't overwrite the accumulated value
+        chunk1 = OrderChunk(orderId="1005", buyer="Chris", state="OH", last_field=OrderField.buyer)
         chunk2 = OrderChunk(buyer="Myers", last_field=OrderField.buyer)
-        llm = FakeLLM(responses=[], structured_responses=[chunk1, chunk2], context_window=743)
-        order = await direct_extraction("Order 1005 Buyer=Chris Myers", llm)
+        llm = FakeLLM(responses=[], structured_responses=[chunk1, chunk2], context_window=744)
+        order = await direct_extraction("Order=1005 Buyer=Chris OH Myers", llm)
         assert order.orderId == "1005"
         assert order.buyer == "Chris Myers"
+        assert order.state is not None
+        assert order.state.value == "OH"
 
     async def test_context_window_too_small_raises_parse_error(self):
         llm = FakeLLM(responses=[], structured_responses=[], context_window=3)
@@ -440,6 +445,62 @@ class TestTrainingTableWrites:
         assert training_ids == retrained_ids
 
 
+_RETRY_QUERY = "Order 1005: Buyer=Chris Myers, Location=Cincinnati, OH, Total=$512.00"
+
+
+class TestDirectExtractionRetries:
+    async def test_retries_once_after_failure(self):
+        err = ValueError("bad structured output")
+        llm = FakeLLM(responses=[], structured_responses=[err, _ORDER_1005], context_window=100_000)
+        order = await direct_extraction(_RETRY_QUERY, llm, max_retries=3)
+        assert llm.structured_call_count == 2
+        assert order.orderId == "1005"
+
+    async def test_error_included_in_retry_prompt(self):
+        err = ValueError("bad structured output")
+        llm = FakeLLM(responses=[], structured_responses=[err, _ORDER_1005], context_window=100_000)
+        await direct_extraction(_RETRY_QUERY, llm, max_retries=3)
+        retry_prompt = llm.structured_messages_log[1][0]["content"]
+        assert "Previous Attempt Errors" in retry_prompt
+        assert "bad structured output" in retry_prompt
+
+    async def test_hallucination_triggers_retry(self):
+        # buyer "Hallucinated Name" does not appear in the query → validation ParseError → retry
+        llm = FakeLLM(responses=[], structured_responses=[_ORDER_1005_HALLUCINATED, _ORDER_1005], context_window=100_000)
+        order = await direct_extraction(_RETRY_QUERY, llm, max_retries=3)
+        assert llm.structured_call_count == 2
+        assert order.buyer == "Chris Myers"
+
+    async def test_orderstrict_failure_triggers_retry(self):
+        # LLM returns only orderId on first attempt — OrderStrict fails (buyer/state required), triggers retry
+        llm = FakeLLM(responses=[], structured_responses=[_ORDER_1005_INCOMPLETE, _ORDER_1005], context_window=100_000)
+        order = await direct_extraction(_RETRY_QUERY, llm, max_retries=3)
+        assert llm.structured_call_count == 2
+        assert order.buyer == "Chris Myers"
+
+    async def test_raises_parse_error_after_max_retries(self):
+        err = ValueError("persistent failure")
+        llm = FakeLLM(responses=[], structured_responses=[err], context_window=100_000)
+        with pytest.raises(ParseError, match="3 attempts"):
+            await direct_extraction(_RETRY_QUERY, llm, max_retries=3)
+        assert llm.structured_call_count == 3
+
+    async def test_retry_prompt_too_large_raises_parse_error(self):
+        probe = FakeLLM(responses=[])
+        n_prompt = probe.count_tokens(_PARSE_CHUNK_TEMPLATE)
+        n_schema = probe.count_tokens(str(OrderChunk.model_json_schema()))
+        # tiny context window → chunk_size ≈ 10 words; error section header alone (~20 words) overflows
+        context_window = n_prompt + n_schema + 25
+        err = ValueError("error")
+        llm = FakeLLM(
+            responses=[],
+            structured_responses=[err, _ORDER_1005],
+            context_window=context_window,
+        )
+        with pytest.raises(ParseError, match="too large"):
+            await direct_extraction("Buyer John Location OH Total", llm, max_retries=2)
+
+
 class TestChunkSizeFormula:
     """Verify that each invoke_structured call's prompt + schema fits within the context window."""
 
@@ -464,9 +525,10 @@ class TestChunkSizeFormula:
             structured_responses=[null_chunk],
             context_window=context_window,
         )
-        # Query longer than chunk_room forces multiple chunks
+        # Query longer than chunk_room forces multiple chunks; raises because gibberish produces no valid order fields
         query = " ".join(f"word{i}" for i in range(chunk_room * 5))
-        await direct_extraction(query, llm)
+        with pytest.raises(ParseError):
+            await direct_extraction(query, llm)
 
         assert len(captured) > 1, "query must produce multiple chunks to exercise the formula"
         for messages in captured:
