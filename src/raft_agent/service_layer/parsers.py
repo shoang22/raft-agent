@@ -10,7 +10,7 @@ from pydantic import Field, ValidationError
 
 from src.raft_agent.adapters.abstractions import AbstractLLM
 from src.raft_agent.adapters.ml_model import AbstractTotalPredictor
-from src.raft_agent.domain.models import FilterCriteria, Order, OrdersOutput, OrderStrict
+from src.raft_agent.domain.models import PartialOrder, Order
 
 _PARSE_CHUNK_TEMPLATE = (Path(__file__).parent / "prompts" / "parse_order_chunk.md").read_text()
 
@@ -35,10 +35,10 @@ class ParseError(Exception):
     pass
 
 
-OrderField = Enum("OrderField", {k: k for k in Order.model_fields})
+OrderField = Enum("OrderField", {k: k for k in PartialOrder.model_fields})
 
 
-class OrderChunk(Order):
+class OrderChunk(PartialOrder):
     last_field: str = Field(..., description="The name of the last field successfully parsed from this order. Used for combining chunked orders.")
 
 
@@ -77,7 +77,7 @@ async def direct_extraction(query: str, llm: AbstractLLM, max_retries: int = 3) 
                     attempt, max_retries, len(chunks), chunk_size, n_tokens_history)
 
         last_field = "null"
-        order = Order()
+        order = PartialOrder()
         attempt_error: Exception | None = None
 
         for chunk in chunks:
@@ -124,8 +124,7 @@ async def direct_extraction(query: str, llm: AbstractLLM, max_retries: int = 3) 
 
         if attempt_error is None:
             try:
-                OrderStrict.model_validate(order.model_dump())
-                return order
+                return Order.model_validate(order.model_dump())
             except ValidationError as e:
                 attempt_error = ParseError(f"Extracted order failed schema validation: {e}")
 
@@ -136,7 +135,7 @@ async def direct_extraction(query: str, llm: AbstractLLM, max_retries: int = 3) 
     raise ParseError("Unreachable")
 
 
-def _merge_partial(base: Order, partial: OrderChunk) -> Order:
+def _merge_partial(base: PartialOrder, partial: OrderChunk) -> PartialOrder:
     """Merge a parsed chunk into the accumulated order.
 
     String fields are concatenated because multi-word values (e.g. buyer "John Smith")

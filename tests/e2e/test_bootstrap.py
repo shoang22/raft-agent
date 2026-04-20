@@ -7,7 +7,7 @@ import pytest
 
 from src.raft_agent.adapters.abstractions import ToolCall
 from src.raft_agent.bootstrap import bootstrap
-from src.raft_agent.domain.models import Order, USState
+from src.raft_agent.domain.models import PartialOrder, USState
 from src.raft_agent.service_layer.parsers import OrderChunk, OrderField
 from src.raft_agent.adapters.progress import NullProgressReporter
 from tests.fakes import FakeLLM, FakeOrdersClient, FakeProgressReporter, FakeTotalPredictor

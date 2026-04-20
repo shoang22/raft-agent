@@ -164,12 +164,12 @@ class FakeTotalPredictor:
         self.retrain_call_count = 0
         self.last_retrain_orders: list = []
 
-    def predict(self, order) -> float | None:
+    def predict(self, order: Order) -> float | None:
         return self._value
 
-    def retrain(self, orders: list) -> None:
+    def retrain(self, orders: list[Order]) -> None:
         self.retrain_call_count += 1
         self.last_retrain_orders = list(orders)
 
-    async def retrain_async(self, orders: list) -> None:
+    async def retrain_async(self, orders: list[Order]) -> None:
         self.retrain(orders)

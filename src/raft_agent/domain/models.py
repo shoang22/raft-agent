@@ -60,7 +60,7 @@ class USState(str, Enum):
     WY = "WY"
 
 
-class Order(BaseModel):
+class PartialOrder(BaseModel):
     orderId: str | None = Field(default=None, description="Unique order identifier (e.g. '1001'). Null if unknown.")
     buyer: str | None = Field(default=None, description="Full name of the customer who placed the order (e.g. 'Jane Smith'). Null if unknown.")
     state: USState | None = Field(default=None, description="Two-letter US state code for the shipping destination (e.g. 'CA'). Null if unknown.")
@@ -76,7 +76,7 @@ class Order(BaseModel):
         return round(v, 2)
 
 
-class OrderStrict(BaseModel):
+class Order(BaseModel):
     orderId: str
     buyer: str
     state: USState
@@ -90,45 +90,3 @@ class OrderStrict(BaseModel):
         if v < 0:
             raise ValueError("total must be non-negative")
         return round(v, 2)
-
-
-class OrdersOutput(BaseModel):
-    orders: list[Order]
-
-
-class FilterCriteria(BaseModel):
-    state: Optional[USState] = None
-    min_total: Optional[float] = None
-    max_total: Optional[float] = None
-    buyer_name_contains: Optional[str] = None
-
-    @field_validator("state", mode="before")
-    @classmethod
-    def normalize_state(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None:
-            return v.upper().strip()
-        return v
-
-    def apply(self, orders: list[Order]) -> list[Order]:
-        result = orders
-
-        if self.state is not None:
-            result = [o for o in result if o.state == self.state]
-
-        if self.min_total is not None:
-            result = [o for o in result if o.total >= self.min_total]
-
-        if self.max_total is not None:
-            result = [o for o in result if o.total <= self.max_total]
-
-        if self.buyer_name_contains is not None:
-            needle = self.buyer_name_contains.lower()
-            result = [o for o in result if needle in o.buyer.lower()]
-
-        logger.info(
-            "Filter applied: %s -> %d/%d orders match",
-            self.model_dump(exclude_none=True),
-            len(result),
-            len(orders),
-        )
-        return result

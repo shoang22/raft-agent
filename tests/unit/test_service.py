@@ -3,7 +3,7 @@ import pytest
 
 from src.raft_agent.adapters.abstractions import ToolCall
 from src.raft_agent.bootstrap import build_tools
-from src.raft_agent.domain.models import FilterCriteria, Order, USState
+from src.raft_agent.domain.models import PartialOrder, Order, USState
 from src.raft_agent.service_layer.agent import run_agent, AgentError
 from src.raft_agent.service_layer.parsers import (
     _PARSE_CHUNK_TEMPLATE,
@@ -65,7 +65,7 @@ class TestParseRawOrders:
 
 class TestOrderSchema:
     def test_field_descriptions_in_json_schema(self):
-        props = Order.model_json_schema()["properties"]
+        props = PartialOrder.model_json_schema()["properties"]
         for field in ("orderId", "buyer", "state", "total"):
             assert "description" in props[field], f"Order.{field} missing schema description"
 
