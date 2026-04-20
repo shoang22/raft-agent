@@ -39,36 +39,43 @@ OrderField = Enum("OrderField", {k: k for k in Order.model_fields})
 
 
 class OrderChunk(Order):
-    last_field: OrderField = Field(..., description="The name of the last field successfully parsed from this order. Used for combining chunked orders.")
+    last_field: str = Field(..., description="The name of the last field successfully parsed from this order. Used for combining chunked orders.")
 
 
-def _build_parse_prompt(last_field: str, chunk: str, error_history: list[str]) -> str:
-    prompt = _PARSE_CHUNK_TEMPLATE.replace("{last_field}", last_field).replace("{chunk}", chunk)
-    if error_history:
-        lines = "\n\n".join(f"Attempt {i + 1} error: {e}" for i, e in enumerate(error_history))
-        prompt += (
-            f"\n\n## Previous Attempt Errors\n\n"
-            f"The following errors occurred on previous attempts. Adjust your response to avoid them:\n\n{lines}"
-        )
-    return prompt
+def build_error_message(error_history: list[str]) -> str: 
+    lines = "\n\n".join(f"Attempt {i + 1} error: {e}" for i, e in enumerate(error_history))
+    return (
+        f"\n\n## Previous Attempt Errors\n\n"
+        f"The following errors occurred on previous attempts. Adjust your response to avoid them:\n\n{lines}"
+    )
 
 
 async def direct_extraction(query: str, llm: AbstractLLM, max_retries: int = 3) -> Order:
     n_tokens_prompt = llm.count_tokens(_PARSE_CHUNK_TEMPLATE)
     n_tokens_schema = llm.count_tokens(str(OrderChunk.model_json_schema()))
-    chunk_size = (llm.context_window - n_tokens_prompt - n_tokens_schema) // 2
-    chunk_size = chunk_size - chunk_size // 5  # reserve ~20% for structured output JSON template overhead
-    if chunk_size <= 0:
-        raise ParseError(
-            f"Context window ({llm.context_window} tokens) is too small to fit prompt "
-            f"({n_tokens_prompt}) and schema ({n_tokens_schema}) overhead"
-        )
-    chunks = chunk_by_words(query, chunk_size=chunk_size, llm=llm)
-    logger.info(f"Created {len(chunks)} chunks.")
-    prompt_budget = n_tokens_prompt + chunk_size
 
     error_history: list[str] = []
     for attempt in range(1, max_retries + 1):
+        # Recompute chunk size each attempt: error history is appended to every chunk's prompt,
+        # so the available space for chunk content shrinks as errors accumulate.
+        error_message = ""
+        if error_history:
+            error_message = build_error_message(error_history=error_history)
+            n_tokens_history = llm.count_tokens(error_message)
+        else:
+            n_tokens_history = 0
+        chunk_size = (llm.context_window - n_tokens_prompt - n_tokens_schema - n_tokens_history) // 2
+        chunk_size = chunk_size - chunk_size // 5  # reserve ~20% for structured output JSON overhead
+        if chunk_size <= 0:
+            raise ParseError(
+                f"Context window ({llm.context_window} tokens) is too small: "
+                f"prompt={n_tokens_prompt}, schema={n_tokens_schema}, error_history={n_tokens_history}"
+            )
+
+        chunks = chunk_by_words(query, chunk_size=chunk_size, llm=llm)
+        logger.info("Attempt %d/%d: %d chunks (chunk_size=%d, history=%d tokens).",
+                    attempt, max_retries, len(chunks), chunk_size, n_tokens_history)
+        # import pdb; pdb.set_trace()
         last_field = "null"
         order = Order()
         attempt_error: Exception | None = None
@@ -78,22 +85,23 @@ async def direct_extraction(query: str, llm: AbstractLLM, max_retries: int = 3) 
             if chunk_tokens > chunk_size:
                 raise ParseError(f"Chunk exceeds chunk_size (count: {chunk_tokens} - limit: {chunk_size}): {chunk!r}")
 
-            prompt = _build_parse_prompt(last_field, chunk, error_history)
-            n_tokens_full = llm.count_tokens(prompt)
-            if n_tokens_full > prompt_budget:
-                raise ParseError(
-                    f"Retry prompt too large for context window on attempt {attempt} "
-                    f"({n_tokens_full} tokens > {prompt_budget} prompt budget)"
-                )
-
+            prompt = _PARSE_CHUNK_TEMPLATE.replace("{last_field}", last_field).replace("{chunk}", chunk)
+            prompt += error_message
             try:
-                partial_order = await llm.invoke_structured(
+                resp = await llm.invoke_structured(
                     [
-                        {"role": "system", "content": "You are a precise data extractor. Return only values explicitly present in the text."},
                         {"role": "user", "content": prompt},
                     ],
                     OrderChunk,
                 )
+                # import pdb; pdb.set_trace()
+                if resp.get('parsing_error'):
+                    raise ParseError(
+                        f"LLM failed to return structured output for chunk (last_field={last_field!r}): {chunk!r}\n\n"
+                        "Error: {}\n\n Raw LLM output: {}".format(resp.get('parsing_error'), resp.get('raw'))
+                    )
+                
+                partial_order = resp['parsed']
                 for k, v in partial_order.model_dump(exclude={"last_field"}).items():
                     if v is None:
                         continue
@@ -104,22 +112,22 @@ async def direct_extraction(query: str, llm: AbstractLLM, max_retries: int = 3) 
                         candidates.add(f"{v:g}")
                     if not any(c in query for c in candidates):
                         raise ParseError(
-                            f"Parsed value {v!r} for field {k} not found in original query: {query!r}"
+                            f"Parsed value {v!r} for field {k!r} not found in original query"
                         )
             except Exception as e:
                 logger.warning("Extraction attempt %d/%d failed on chunk: %s", attempt, max_retries, e)
                 attempt_error = e
                 break
 
-            last_field = partial_order.last_field.value
+            last_field = partial_order.last_field
             order = _merge_partial(order, partial_order)
 
         if attempt_error is None:
             try:
                 OrderStrict.model_validate(order.model_dump())
                 return order
-            except ValidationError:
-                attempt_error = ParseError(f"Invalid model result: {order}")
+            except ValidationError as e:
+                attempt_error = ParseError(f"Extracted order failed schema validation: {e}")
 
         error_history.append(str(attempt_error))
         logger.warning("Extraction attempt %d/%d failed: %s", attempt, max_retries, attempt_error)

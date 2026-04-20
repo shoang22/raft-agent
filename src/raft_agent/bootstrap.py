@@ -51,7 +51,8 @@ class _LangChainOpenAIAdapter(AbstractLLM):
         return ToolCall(name=tc["name"], arguments=tc["args"])
 
     async def invoke_structured(self, messages: list, schema: type) -> Any:
-        return await self._model.with_structured_output(schema).ainvoke(messages)
+        out = await self._model.with_structured_output(schema, include_raw=True).ainvoke(messages)
+        return out
 
     def count_tokens(self, text: str) -> int:
         return len(self._ENCODING.encode(text))

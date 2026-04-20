@@ -60,8 +60,8 @@ class FakeLLM(AbstractLLM):
         obj = self._structured_responses[self.structured_call_count % len(self._structured_responses)]
         self.structured_call_count += 1
         if isinstance(obj, Exception):
-            raise obj
-        return obj
+            return {'parsed': None, 'parsing_error': obj, 'raw': None}
+        return {'parsed': obj, 'parsing_error': None, 'raw': None}
 
     def count_tokens(self, text: str) -> int:
         return len(text.split())

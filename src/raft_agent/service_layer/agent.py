@@ -106,7 +106,7 @@ async def _query_node(state: AgentState, llm: AbstractLLM, uow: AbstractUnitOfWo
 
 def _format_single_node(state: AgentState) -> dict:
     orders = [
-        {"orderId": o.orderId, "buyer": o.buyer, "state": o.state, "total": o.total}
+        {"orderId": o.orderId, "buyer": o.buyer, "state": o.state.value, "total": o.total}
         for o in state["parsed_orders"]
     ]
     return {"query_results": orders}

@@ -3,7 +3,7 @@ import pytest
 
 from src.raft_agent.adapters.abstractions import ToolCall
 from src.raft_agent.bootstrap import build_tools
-from src.raft_agent.domain.models import FilterCriteria, Order
+from src.raft_agent.domain.models import FilterCriteria, Order, USState
 from src.raft_agent.service_layer.agent import run_agent, AgentError
 from src.raft_agent.service_layer.parsers import (
     _PARSE_CHUNK_TEMPLATE,
@@ -68,20 +68,6 @@ class TestOrderSchema:
         props = Order.model_json_schema()["properties"]
         for field in ("orderId", "buyer", "state", "total"):
             assert "description" in props[field], f"Order.{field} missing schema description"
-
-
-class TestDirectExtractionSystemMessage:
-    async def test_sends_system_message_as_first_role(self):
-        chunk = OrderChunk(orderId="1001", buyer="John Davis", state="OH", total=742.10, last_field=OrderField.total)
-        llm = FakeLLM(responses=[], structured_responses=[chunk])
-        await direct_extraction(
-            "Order 1001: Buyer=John Davis, Location=Columbus, OH, Total=$742.10",
-            llm,
-        )
-        messages = llm.structured_messages_log[0]
-        roles = [m["role"] for m in messages]
-        assert roles[0] == "system"
-        assert roles[1] == "user"
 
 
 class TestGenerateSqlQuery:
@@ -388,10 +374,10 @@ class TestDirectExtraction:
         assert order.total == 512.00
 
     async def test_multi_chunk_concatenates_split_buyer(self):
-        # context_window=934 → chunk_size=(934-741-186)//2=3, so 6-word query splits into 2 chunks of ≤3 words
+        # context_window=958 → chunk_size=(958-773-179)//2=3, so 6-word query splits into 2 chunks of ≤3 words
         chunk1 = OrderChunk(orderId="1005", buyer="Chris", last_field=OrderField.buyer)
         chunk2 = OrderChunk(buyer="Myers", state="OH", total=512.00, last_field=OrderField.total)
-        llm = FakeLLM(responses=[], structured_responses=[chunk1, chunk2], context_window=934)
+        llm = FakeLLM(responses=[], structured_responses=[chunk1, chunk2], context_window=958)
         order = await direct_extraction("Order 1005 Buyer=Chris Myers Location=OH Total=512.00", llm)
         assert order.orderId == "1005"
         assert order.buyer == "Chris Myers"
@@ -400,11 +386,11 @@ class TestDirectExtraction:
         assert llm.structured_call_count == 2
 
     async def test_none_fields_in_later_chunk_do_not_overwrite(self):
-        # context_window=932 → chunk_size=(932-741-186)//2=2, so 4-word query splits into 2 chunks of ≤2 words
+        # context_window=956 → chunk_size=(956-773-179)//2=2, so 4-word query splits into 2 chunks of ≤2 words
         # chunk1 sets state=OH; chunk2 omits state (None) — verifies None doesn't overwrite the accumulated value
         chunk1 = OrderChunk(orderId="1005", buyer="Chris", state="OH", last_field=OrderField.buyer)
         chunk2 = OrderChunk(buyer="Myers", last_field=OrderField.buyer)
-        llm = FakeLLM(responses=[], structured_responses=[chunk1, chunk2], context_window=932)
+        llm = FakeLLM(responses=[], structured_responses=[chunk1, chunk2], context_window=956)
         order = await direct_extraction("Order=1005 Buyer=Chris OH Myers", llm)
         assert order.orderId == "1005"
         assert order.buyer == "Chris Myers"
@@ -415,6 +401,19 @@ class TestDirectExtraction:
         llm = FakeLLM(responses=[], structured_responses=[], context_window=3)
         with pytest.raises(ParseError, match="Context window"):
             await direct_extraction("Order 1005", llm)
+
+    async def test_last_field_can_be_unrecognised_field_name(self):
+        # When a chunk ends on an unrecognised field (e.g. "Items"), last_field must
+        # reflect that label so the next chunk knows the leading words are a continuation.
+        chunk = OrderChunk(orderId="1001", buyer="John Davis", state=USState.OH, total=742.10, last_field="items")
+        llm = FakeLLM(responses=[], structured_responses=[chunk], context_window=10_000)
+        order = await direct_extraction(
+            "Order 1001: Buyer=John Davis, Location=Columbus, OH, Total=$742.10, Items: item0, item1", llm
+        )
+        assert order.orderId == "1001"
+        assert order.buyer == "John Davis"
+        assert order.state == USState.OH
+        assert order.total == 742.10
 
 
 class TestTrainingTableWrites:
@@ -481,7 +480,7 @@ class TestDirectExtractionRetries:
         err = ValueError("bad structured output")
         llm = FakeLLM(responses=[], structured_responses=[err, _ORDER_1005], context_window=100_000)
         await direct_extraction(_RETRY_QUERY, llm, max_retries=3)
-        retry_prompt = llm.structured_messages_log[1][1]["content"]
+        retry_prompt = llm.structured_messages_log[1][0]["content"]
         assert "Previous Attempt Errors" in retry_prompt
         assert "bad structured output" in retry_prompt
 
@@ -510,15 +509,15 @@ class TestDirectExtractionRetries:
         probe = FakeLLM(responses=[])
         n_prompt = probe.count_tokens(_PARSE_CHUNK_TEMPLATE)
         n_schema = probe.count_tokens(str(OrderChunk.model_json_schema()))
-        # tiny context window → chunk_size ≈ 10 words; error section header alone (~20 words) overflows
-        context_window = n_prompt + n_schema + 25
+        # free space is 15 words; error section header is ~21 words, so chunk_size goes ≤ 0 on retry
+        context_window = n_prompt + n_schema + 15
         err = ValueError("error")
         llm = FakeLLM(
             responses=[],
             structured_responses=[err, _ORDER_1005],
             context_window=context_window,
         )
-        with pytest.raises(ParseError, match="too large"):
+        with pytest.raises(ParseError, match="too small"):
             await direct_extraction("Buyer John Location OH Total", llm, max_retries=2)
 
 
