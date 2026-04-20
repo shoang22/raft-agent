@@ -75,7 +75,7 @@ async def direct_extraction(query: str, llm: AbstractLLM, max_retries: int = 3) 
         chunks = chunk_by_words(query, chunk_size=chunk_size, llm=llm)
         logger.info("Attempt %d/%d: %d chunks (chunk_size=%d, history=%d tokens).",
                     attempt, max_retries, len(chunks), chunk_size, n_tokens_history)
-        # import pdb; pdb.set_trace()
+
         last_field = "null"
         order = Order()
         attempt_error: Exception | None = None
@@ -94,7 +94,7 @@ async def direct_extraction(query: str, llm: AbstractLLM, max_retries: int = 3) 
                     ],
                     OrderChunk,
                 )
-                # import pdb; pdb.set_trace()
+
                 if resp.get('parsing_error'):
                     raise ParseError(
                         f"LLM failed to return structured output for chunk (last_field={last_field!r}): {chunk!r}\n\n"
