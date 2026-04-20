@@ -30,12 +30,22 @@ The input text may not use the exact field names from the Order schema. Use sema
 
 | If you see… | Map to |
 |-------------|--------|
-| `id`, `order_number`, `ref`, `#1234` | `orderId` |
-| `customer`, `client`, `name`, `purchaser` | `buyer` |
-| `region`, `location`, `province`, `st` | `state` |
-| `amount`, `price`, `cost`, `value` | `total` |
+| `id`, `order_number`, `order`, `ref`, `#1234` | `orderId` |
+| `buyer`, `customer`, `client`, `name`, `purchaser` | `buyer` |
+| `region`, `location`, `province`, `city`, `st`, `address` | `state` |
+| `amount`, `price`, `cost`, `total`, `value` | `total` |
 
 Ignore any fields in the input that do not correspond to any Order field.
+
+## Format Notes
+
+Input text can arrive in any format. Apply these rules universally:
+
+- **Delimiters**: Fields may use any separator — `:`, `=`, `|`, space, comma, or none. Treat any key-value separator as a field assignment.
+- **Location values**: A location field may contain a city, city+state, full address, or state name/abbreviation. Always extract only the 2-letter US state abbreviation (e.g. `Columbus, OH` → `OH`; `California` → `CA`; `Austin TX` → `TX`).
+- **Numeric prefixes/suffixes**: Monetary values may carry currency symbols or codes (`$`, `€`, `USD`). Extract the numeric value only (e.g. `$350.00` → `350.0`).
+- **Unrecognised fields**: If a label has no clear semantic match to an Order field, ignore it entirely.
+- **Case**: Field labels may be any case (`BUYER`, `Buyer`, `buyer` are all equivalent).
 
 ## Instructions
 

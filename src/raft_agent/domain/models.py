@@ -2,7 +2,7 @@
 import logging
 from enum import Enum
 from typing import Optional
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -61,14 +61,10 @@ class USState(str, Enum):
 
 
 class Order(BaseModel):
-    orderId: str | None = None
-    """Unique order identifier (e.g. 'ORD-1042'). Null if unknown."""
-    buyer: str | None = None
-    """Full name of the customer who placed the order (e.g. 'Jane Smith'). Null if unknown."""
-    state: USState | None = None
-    """Two-letter US state code for the shipping destination (e.g. 'CA'). Null if unknown."""
-    total: float | None = None
-    """Order total in USD, rounded to two decimal places (e.g. 149.99). Null if unknown."""
+    orderId: str | None = Field(default=None, description="Unique order identifier (e.g. '1001'). Null if unknown.")
+    buyer: str | None = Field(default=None, description="Full name of the customer who placed the order (e.g. 'Jane Smith'). Null if unknown.")
+    state: USState | None = Field(default=None, description="Two-letter US state code for the shipping destination (e.g. 'CA'). Null if unknown.")
+    total: float | None = Field(default=None, description="Order total in USD, rounded to two decimal places (e.g. 149.99). Null if unknown.")
 
     @field_validator("total")
     @classmethod
