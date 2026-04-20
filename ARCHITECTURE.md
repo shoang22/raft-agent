@@ -103,8 +103,8 @@ tests/integration/test_orders_client.py    - HTTP adapter integration tests
 
 | Problem                   | Solution                                                                  |
 |---------------------------|---------------------------------------------------------------------------|
-| Context window overflow   | `parse_raw_orders` batches input; reserves 20% token budget for schema   |
-| LLM hallucination         | Pydantic validation on every LLM response; invalid items skipped          |
+| Context window overflow   | `parse_raw_orders` batches input                                          |
+| LLM hallucination         | Pydantic validation on every LLM response                                  |
 | Invalid SQL from LLM      | `generate_sql_query` retries up to 3×; validates output starts with SELECT |
 | Missing order totals      | `LinearRegressionTotalPredictor` imputes missing values from training data |
 | API unavailability        | `APIError` propagated as `AgentError` with message                        |
