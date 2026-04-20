@@ -1,15 +1,14 @@
 """Service-layer tests — use fakes, no real infrastructure."""
 import pytest
 
-from raft_agent.adapters.abstractions import ToolCall
-from raft_agent.bootstrap import build_tools
-from raft_agent.domain.models import FilterCriteria, Order
-from raft_agent.service_layer.agent import run_agent, AgentError
-from raft_agent.service_layer.parsers import (
+from src.raft_agent.adapters.abstractions import ToolCall
+from src.raft_agent.bootstrap import build_tools
+from src.raft_agent.domain.models import FilterCriteria, Order
+from src.raft_agent.service_layer.agent import run_agent, AgentError
+from src.raft_agent.service_layer.parsers import (
     _PARSE_CHUNK_TEMPLATE,
     direct_extraction,
     parse_raw_orders,
-    extract_filter_criteria,
     generate_sql_query,
     chunk_by_words,
     OrderChunk,
@@ -62,26 +61,6 @@ class TestParseRawOrders:
         llm = FakeLLM(responses=[], structured_responses=[chunk])
         orders = await parse_raw_orders(["#2001 | Jane | Texas TX | 99.99 USD"], llm)
         assert len(orders) == 1
-
-
-class TestExtractFilterCriteria:
-    async def test_extracts_state_and_min_total(self):
-        criteria_response = FilterCriteria(state="OH", min_total=500.0)
-        llm = FakeLLM(responses=[], structured_responses=[criteria_response])
-        criteria = await extract_filter_criteria(
-            "Show me all orders where the buyer was located in Ohio and total value was over 500",
-            llm,
-        )
-        assert criteria.state == "OH"
-        assert criteria.min_total == 500.0
-        assert criteria.max_total is None
-
-    async def test_extracts_state_only(self):
-        criteria_response = FilterCriteria(state="TX")
-        llm = FakeLLM(responses=[], structured_responses=[criteria_response])
-        criteria = await extract_filter_criteria("orders from Texas", llm)
-        assert criteria.state == "TX"
-        assert criteria.min_total is None
 
 
 class TestGenerateSqlQuery:
@@ -246,7 +225,7 @@ class TestRunAgent:
 # Linear regression predictor — imputation tests
 # ---------------------------------------------------------------------------
 
-from raft_agent.service_layer.parsers import _impute_totals
+from src.raft_agent.service_layer.parsers import _impute_totals
 from tests.fakes import FakeTotalPredictor
 
 

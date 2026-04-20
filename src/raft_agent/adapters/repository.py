@@ -10,7 +10,7 @@ import abc
 from sqlalchemy import Column, Float, MetaData, String, Table, text
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from raft_agent.domain.models import Order
+from src.raft_agent.domain.models import Order
 
 # ---------------------------------------------------------------------------
 # Ephemeral table (in-memory, per-run)

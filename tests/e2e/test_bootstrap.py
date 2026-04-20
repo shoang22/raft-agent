@@ -5,10 +5,10 @@ a real in-memory SQLite database so the full persistence path is exercised.
 """
 import pytest
 
-from raft_agent.adapters.abstractions import ToolCall
-from raft_agent.bootstrap import bootstrap
-from raft_agent.domain.models import Order, USState
-from raft_agent.service_layer.parsers import OrderChunk, OrderField
+from src.raft_agent.adapters.abstractions import ToolCall
+from src.raft_agent.bootstrap import bootstrap
+from src.raft_agent.domain.models import Order, USState
+from src.raft_agent.service_layer.parsers import OrderChunk, OrderField
 from tests.fakes import FakeLLM, FakeOrdersClient, FakeTotalPredictor
 
 _RAW_ORDERS = [

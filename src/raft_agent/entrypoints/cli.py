@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 
 
 async def main() -> None:
-    from raft_agent.bootstrap import bootstrap
-    from raft_agent.service_layer.agent import AgentError
+    from src.raft_agent.bootstrap import bootstrap
+    from src.raft_agent.service_layer.agent import AgentError
 
     if len(sys.argv) > 1:
         query = " ".join(sys.argv[1:])

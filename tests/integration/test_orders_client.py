@@ -4,7 +4,7 @@ import pytest
 import httpx
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from raft_agent.adapters.orders_client import OrdersAPIClient, APIError
+from src.raft_agent.adapters.orders_client import OrdersAPIClient, APIError
 
 
 def _make_mock_client(response: MagicMock) -> AsyncMock:
@@ -39,13 +39,13 @@ class TestFetchAllOrders:
     async def test_success_returns_raw_order_list(self):
         raw_orders = ["Order 1001: Buyer=John Davis"]
         mock_client = _make_mock_client(_ok_response({"status": "ok", "raw_orders": raw_orders}))
-        with patch("raft_agent.adapters.orders_client.httpx.AsyncClient", return_value=mock_client):
+        with patch("src.raft_agent.adapters.orders_client.httpx.AsyncClient", return_value=mock_client):
             result = await OrdersAPIClient(base_url="http://localhost:5001").fetch_orders()
         assert result == raw_orders
 
     async def test_with_limit_passes_query_param(self):
         mock_client = _make_mock_client(_ok_response({"status": "ok", "raw_orders": []}))
-        with patch("raft_agent.adapters.orders_client.httpx.AsyncClient", return_value=mock_client):
+        with patch("src.raft_agent.adapters.orders_client.httpx.AsyncClient", return_value=mock_client):
             await OrdersAPIClient(base_url="http://localhost:5001").fetch_orders(limit=1)
         mock_client.get.assert_called_once_with(
             "http://localhost:5001/api/orders", params={"limit": 1}, timeout=10
@@ -53,7 +53,7 @@ class TestFetchAllOrders:
 
     async def test_server_error_raises_api_error(self):
         mock_client = _make_mock_client(_error_response(500))
-        with patch("raft_agent.adapters.orders_client.httpx.AsyncClient", return_value=mock_client):
+        with patch("src.raft_agent.adapters.orders_client.httpx.AsyncClient", return_value=mock_client):
             with pytest.raises(APIError):
                 await OrdersAPIClient(base_url="http://localhost:5001").fetch_orders()
 
@@ -62,7 +62,7 @@ class TestFetchAllOrders:
         mock_client.get.side_effect = httpx.ConnectError("refused")
         mock_client.__aenter__.return_value = mock_client
         mock_client.__aexit__.return_value = None
-        with patch("raft_agent.adapters.orders_client.httpx.AsyncClient", return_value=mock_client):
+        with patch("src.raft_agent.adapters.orders_client.httpx.AsyncClient", return_value=mock_client):
             with pytest.raises(APIError, match="refused"):
                 await OrdersAPIClient(base_url="http://localhost:5001").fetch_orders()
 
@@ -71,19 +71,19 @@ class TestFetchOrderById:
     async def test_found_returns_raw_order_text(self):
         raw_order = "Order 1003: Buyer=Mike Turner, Location=Cleveland, OH, Total=$1299.99"
         mock_client = _make_mock_client(_ok_response({"status": "ok", "raw_order": raw_order}))
-        with patch("raft_agent.adapters.orders_client.httpx.AsyncClient", return_value=mock_client):
+        with patch("src.raft_agent.adapters.orders_client.httpx.AsyncClient", return_value=mock_client):
             result = await OrdersAPIClient(base_url="http://localhost:5001").fetch_order_by_id("1003")
         assert result == raw_order
 
     async def test_not_found_raises_api_error(self):
         mock_client = _make_mock_client(_error_response(404))
-        with patch("raft_agent.adapters.orders_client.httpx.AsyncClient", return_value=mock_client):
+        with patch("src.raft_agent.adapters.orders_client.httpx.AsyncClient", return_value=mock_client):
             with pytest.raises(APIError):
                 await OrdersAPIClient(base_url="http://localhost:5001").fetch_order_by_id("9999")
 
     async def test_server_error_raises_api_error(self):
         mock_client = _make_mock_client(_error_response(500))
-        with patch("raft_agent.adapters.orders_client.httpx.AsyncClient", return_value=mock_client):
+        with patch("src.raft_agent.adapters.orders_client.httpx.AsyncClient", return_value=mock_client):
             with pytest.raises(APIError):
                 await OrdersAPIClient(base_url="http://localhost:5001").fetch_order_by_id("1001")
 
@@ -92,6 +92,6 @@ class TestFetchOrderById:
         mock_client.get.side_effect = httpx.RequestError("timeout")
         mock_client.__aenter__.return_value = mock_client
         mock_client.__aexit__.return_value = None
-        with patch("raft_agent.adapters.orders_client.httpx.AsyncClient", return_value=mock_client):
+        with patch("src.raft_agent.adapters.orders_client.httpx.AsyncClient", return_value=mock_client):
             with pytest.raises(APIError, match="timeout"):
                 await OrdersAPIClient(base_url="http://localhost:5001").fetch_order_by_id("1001")

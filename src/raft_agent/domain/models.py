@@ -76,6 +76,22 @@ class Order(BaseModel):
         return round(v, 2)
 
 
+class OrderStrict(BaseModel):
+    orderId: str
+    buyer: str
+    state: USState
+    total: float | None = None
+
+    @field_validator("total")
+    @classmethod
+    def validate_total(cls, v: Optional[float]) -> Optional[float]:
+        if v is None:
+            return None
+        if v < 0:
+            raise ValueError("total must be non-negative")
+        return round(v, 2)
+
+
 class OrdersOutput(BaseModel):
     orders: list[Order]
 

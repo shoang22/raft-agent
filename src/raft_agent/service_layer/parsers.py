@@ -5,34 +5,17 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
-from pydantic import Field
+from pydantic import Field, ValidationError
 
-from raft_agent.adapters.abstractions import AbstractLLM
-from raft_agent.adapters.ml_model import AbstractTotalPredictor
-from raft_agent.domain.models import FilterCriteria, Order, OrdersOutput
+from src.raft_agent.adapters.abstractions import AbstractLLM
+from src.raft_agent.adapters.ml_model import AbstractTotalPredictor
+from src.raft_agent.domain.models import FilterCriteria, Order, OrdersOutput, OrderStrict
 
 _PARSE_CHUNK_TEMPLATE = (Path(__file__).parent / "prompts" / "parse_order_chunk.md").read_text()
 
 
 logger = logging.getLogger(__name__)
 
-_PARSE_SYSTEM = (
-    "You are a data extraction assistant. "
-    "Given raw order text (which may vary in format), extract structured order data. "
-    "To address LLM context window limitations, you may receive the order text in multiple chunks; "
-    "each chunk will have a 'last_field' property indicating the last successfully parsed field from "
-    "the previous chunk; this field might have been split between chunks. "
-    "Use this to continue parsing where the last chunk left off, "
-    "ensuring that all fields are correctly extracted across chunks. "
-    "Example: "
-)
-
-_FILTER_SYSTEM = (
-    "You are a query parser. Given a natural language query about orders, "
-    "extract filter criteria: state (2-letter state code or null), "
-    "min_total (number or null), max_total (number or null), "
-    "buyer_name_contains (string or null)."
-)
 
 _SQL_SYSTEM = (
     "You are a SQL query generator. Given a natural language query about customer orders, "
@@ -59,18 +42,20 @@ async def direct_extraction(query: str, llm: AbstractLLM) -> Order:
     n_tokens_prompt = llm.count_tokens(_PARSE_CHUNK_TEMPLATE)
     n_tokens_schema = llm.count_tokens(str(OrderChunk.model_json_schema()))
     chunk_size = (llm.context_window - n_tokens_prompt - n_tokens_schema) // 2
+    chunk_size = chunk_size - chunk_size // 5  # reserve ~20% for structured output JSON template overhead
     if chunk_size <= 0:
         raise ParseError(
             f"Context window ({llm.context_window} tokens) is too small to fit prompt "
             f"({n_tokens_prompt}) and schema ({n_tokens_schema}) overhead"
         )
     chunks = chunk_by_words(query, chunk_size=chunk_size, llm=llm)
+    logger.info(f"Created {len(chunks)} chunks.")
     last_field = "null"
     order = Order()
     for chunk in chunks:
         chunk_tokens = llm.count_tokens(chunk)
-        if chunk_tokens > llm.context_window:
-            raise ParseError(f"Chunk exceeds model context window (count: {chunk_tokens} - limit: {llm.context_window}): {chunk!r}")
+        if chunk_tokens > chunk_size:
+            raise ParseError(f"Chunk exceeds chunk_size (count: {chunk_tokens} - limit: {chunk_size}): {chunk!r}")
 
         prompt = _PARSE_CHUNK_TEMPLATE.replace("{last_field}", last_field).replace("{chunk}", chunk)
         partial_order = await llm.invoke_structured(
@@ -91,6 +76,12 @@ async def direct_extraction(query: str, llm: AbstractLLM) -> Order:
             candidates.add(f"{v:g}")
         if not any(c in query for c in candidates):
             raise ParseError(f"Parsed value {v!r} for field {k} not found in original query: {query!r}")
+    required = ("orderId", "buyer", "state")
+    if all(getattr(order, f) is not None for f in required):
+        try:
+            OrderStrict.model_validate(order.model_dump())
+        except ValidationError as e:
+            raise ParseError(f"Invalid model result: {order}") from e
 
     return order
 
@@ -165,32 +156,30 @@ def chunk_by_words(text: str, chunk_size: int, llm: AbstractLLM) -> list[str]:
     own is emitted as a chunk by itself.
     """
     words = text.split()
+    if not words:
+        return []
+
+    word_tokens = [llm.count_tokens(words[0])] + [
+        llm.count_tokens(" " + w) for w in words[1:]
+    ]
+
     chunks: list[str] = []
     current_words: list[str] = []
+    current_tokens = 0
 
-    for word in words:
-        candidate = " ".join(current_words + [word])
-        if current_words and llm.count_tokens(candidate) > chunk_size:
+    for word, tokens in zip(words, word_tokens):
+        if current_words and current_tokens + tokens > chunk_size:
             chunks.append(" ".join(current_words))
             current_words = [word]
+            current_tokens = tokens
         else:
             current_words.append(word)
+            current_tokens += tokens
 
     if current_words:
         chunks.append(" ".join(current_words))
 
     return chunks
-
-
-async def extract_filter_criteria(query: str, llm: AbstractLLM) -> FilterCriteria:
-    """Use the LLM to extract structured filter criteria from a natural language query."""
-    return await llm.invoke_structured(
-        [
-            {"role": "system", "content": _FILTER_SYSTEM},
-            {"role": "user", "content": query},
-        ],
-        FilterCriteria,
-    )
 
 
 async def generate_sql_query(query: str, llm: AbstractLLM, max_retries: int = 3) -> str:

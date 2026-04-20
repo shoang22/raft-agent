@@ -4,12 +4,12 @@ from typing import Optional, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from raft_agent.adapters.abstractions import AbstractLLM, ToolCall
-from raft_agent.adapters.ml_model import AbstractTotalPredictor
-from raft_agent.adapters.orders_client import APIError
-from raft_agent.adapters.unit_of_work import AbstractUnitOfWork
-from raft_agent.domain.models import Order
-from raft_agent.service_layer.parsers import ParseError, generate_sql_query, parse_raw_orders
+from src.raft_agent.adapters.abstractions import AbstractLLM, ToolCall
+from src.raft_agent.adapters.ml_model import AbstractTotalPredictor
+from src.raft_agent.adapters.orders_client import APIError
+from src.raft_agent.adapters.unit_of_work import AbstractUnitOfWork
+from src.raft_agent.domain.models import Order
+from src.raft_agent.service_layer.parsers import ParseError, generate_sql_query, parse_raw_orders
 
 logger = logging.getLogger(__name__)
 

@@ -10,7 +10,7 @@ import joblib
 import numpy as np
 from sklearn.linear_model import LinearRegression
 
-from raft_agent.domain.models import Order, USState
+from src.raft_agent.domain.models import Order, USState
 
 logger = logging.getLogger(__name__)
 

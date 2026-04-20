@@ -4,14 +4,14 @@ from typing import Any
 
 import tiktoken
 from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI
+from langchain_openrouter import ChatOpenRouter
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from raft_agent.adapters.abstractions import AbstractLLM, AbstractOrdersClient, ToolCall
-from raft_agent.adapters.ml_model import AbstractTotalPredictor, LinearRegressionTotalPredictor
-from raft_agent.adapters.orders_client import OrdersAPIClient
-from raft_agent.adapters.unit_of_work import DEFAULT_TRAINING_DB_URL, SqlAlchemyUnitOfWork
-from raft_agent.service_layer.agent import run_agent
+from src.raft_agent.adapters.abstractions import AbstractLLM, AbstractOrdersClient, ToolCall
+from src.raft_agent.adapters.ml_model import AbstractTotalPredictor, LinearRegressionTotalPredictor
+from src.raft_agent.adapters.orders_client import OrdersAPIClient
+from src.raft_agent.adapters.unit_of_work import DEFAULT_TRAINING_DB_URL, SqlAlchemyUnitOfWork
+from src.raft_agent.service_layer.agent import run_agent
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 MODEL_NAME = "openai/gpt-oss-120b:exacto"
@@ -39,7 +39,7 @@ class _LangChainOpenAIAdapter(AbstractLLM):
     _ENCODING = tiktoken.get_encoding("cl100k_base")
 
     def __init__(self, model: Any, context_window: int) -> None:
-        self._model: ChatOpenAI = model
+        self._model: ChatOpenRouter = model
         super().__init__(context_window=context_window)
 
     async def invoke(self, messages: list) -> Any:
@@ -59,13 +59,16 @@ class _LangChainOpenAIAdapter(AbstractLLM):
 
 def build_llm() -> AbstractLLM:
     api_key = os.environ.get("OPENROUTER_API_KEY", "")
-    model = ChatOpenAI(
+    context_window = 131_072
+    model = ChatOpenRouter(
         model=MODEL_NAME,
-        openai_api_key=api_key,
-        openai_api_base=OPENROUTER_BASE_URL,
+        openrouter_api_key=api_key,
+        openrouter_api_base=OPENROUTER_BASE_URL,
         temperature=0,
+        openrouter_provider={"order": ["google-vertex"]}
+
     )
-    return _LangChainOpenAIAdapter(model, context_window=131_072)
+    return _LangChainOpenAIAdapter(model, context_window=context_window)
 
 
 def bootstrap(

@@ -4,7 +4,7 @@ from typing import Optional
 
 import httpx
 
-from raft_agent.adapters.abstractions import AbstractOrdersClient
+from src.raft_agent.adapters.abstractions import AbstractOrdersClient
 
 logger = logging.getLogger(__name__)
 

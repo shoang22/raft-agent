@@ -3,7 +3,7 @@ import abc
 
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from raft_agent.adapters.repository import (
+from src.raft_agent.adapters.repository import (
     AbstractOrderRepository,
     AbstractTrainingRepository,
     SqlAlchemyOrderRepository,

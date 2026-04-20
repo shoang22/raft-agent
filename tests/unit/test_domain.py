@@ -1,7 +1,7 @@
 """Unit tests for domain model — no infrastructure, no fakes needed."""
 import pytest
 
-from raft_agent.domain.models import Order, FilterCriteria
+from src.raft_agent.domain.models import Order, FilterCriteria
 
 
 class TestOrderModel:

@@ -1,8 +1,8 @@
 """Unit tests for LinearRegressionTotalPredictor persistence (save/load)."""
 import pytest
 
-from raft_agent.adapters.ml_model import LinearRegressionTotalPredictor
-from raft_agent.domain.models import Order
+from src.raft_agent.adapters.ml_model import LinearRegressionTotalPredictor
+from src.raft_agent.domain.models import Order
 
 _TRAINING_ORDERS = [
     Order(orderId="1", buyer="Alice", state="OH", total=500.0),

@@ -6,15 +6,15 @@ from typing import Any, Optional
 
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from raft_agent.adapters.abstractions import AbstractLLM, AbstractOrdersClient, ToolCall
-from raft_agent.adapters.orders_client import APIError
-from raft_agent.adapters.repository import (
+from src.raft_agent.adapters.abstractions import AbstractLLM, AbstractOrdersClient, ToolCall
+from src.raft_agent.adapters.orders_client import APIError
+from src.raft_agent.adapters.repository import (
     AbstractTrainingRepository,
     SqlAlchemyOrderRepository,
     _ephemeral_metadata,
 )
-from raft_agent.adapters.unit_of_work import AbstractUnitOfWork
-from raft_agent.domain.models import Order
+from src.raft_agent.adapters.unit_of_work import AbstractUnitOfWork
+from src.raft_agent.domain.models import Order
 
 
 class _FakeResponse:
@@ -34,7 +34,7 @@ class FakeLLM(AbstractLLM):
         responses: list[str],
         tool_call_responses: list[ToolCall] | None = None,
         structured_responses: list[Any] | None = None,
-        context_window: int = 10_000,
+        context_window: int = 100_000,
     ) -> None:
         super().__init__(context_window=context_window)
         self._responses = responses
