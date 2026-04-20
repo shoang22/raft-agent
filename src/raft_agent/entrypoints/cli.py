@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Entry point: python -m raft_llm.entrypoints.cli
+"""Entry point: python -m raft_agent.entrypoints.cli
 
 Usage:
-    python -m raft_llm.entrypoints.cli
-    python -m raft_llm.entrypoints.cli "orders from Ohio over 500"
+    python -m raft_agent.entrypoints.cli
+    python -m raft_agent.entrypoints.cli "orders from Ohio over 500"
 """
+import asyncio
 import json
 import logging
 import sys
@@ -21,9 +22,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def main() -> None:
-    from raft_llm.bootstrap import bootstrap
-    from raft_llm.service_layer.agent import AgentError
+async def main() -> None:
+    from raft_agent.bootstrap import bootstrap
+    from raft_agent.service_layer.agent import AgentError
 
     if len(sys.argv) > 1:
         query = " ".join(sys.argv[1:])
@@ -39,7 +40,7 @@ def main() -> None:
     print(f"\nProcessing: {query!r}\n")
     try:
         run_agent = bootstrap()
-        result = run_agent(query)
+        result = await run_agent(query)
         print(json.dumps(result, indent=2))
     except AgentError as e:
         logger.error("Agent failed: %s", e)
@@ -48,4 +49,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

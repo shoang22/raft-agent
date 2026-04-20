@@ -37,7 +37,7 @@ User NL Query
 ## Layers
 
 ```
-src/raft_llm/
+src/raft_agent/
 ├── domain/
 │   └── models.py          # Order, FilterCriteria, OrdersOutput (Pydantic)
 ├── adapters/
@@ -80,15 +80,15 @@ Any node sets state["error"] → END (raises AgentError to caller)
 
 ```
 main.py                              - shell entry point (delegates to cli.py)
-src/raft_llm/entrypoints/cli.py      - CLI: loads .env, calls bootstrap(), prints JSON
-src/raft_llm/bootstrap.py            - wires LLM + tools + UoW; returns run(query) callable
-src/raft_llm/service_layer/agent.py  - LangGraph graph definition and run_agent()
-src/raft_llm/service_layer/parsers.py - parse_raw_orders, generate_sql_query
-src/raft_llm/adapters/abstractions.py - AbstractLLM, AbstractOrdersClient
-src/raft_llm/adapters/orders_client.py - HTTP adapter; raises APIError
-src/raft_llm/adapters/repository.py  - SQLAlchemy Core repository
-src/raft_llm/adapters/unit_of_work.py - transaction boundary
-src/raft_llm/domain/models.py        - Order, FilterCriteria, OrdersOutput
+src/raft_agent/entrypoints/cli.py      - CLI: loads .env, calls bootstrap(), prints JSON
+src/raft_agent/bootstrap.py            - wires LLM + tools + UoW; returns run(query) callable
+src/raft_agent/service_layer/agent.py  - LangGraph graph definition and run_agent()
+src/raft_agent/service_layer/parsers.py - parse_raw_orders, generate_sql_query
+src/raft_agent/adapters/abstractions.py - AbstractLLM, AbstractOrdersClient
+src/raft_agent/adapters/orders_client.py - HTTP adapter; raises APIError
+src/raft_agent/adapters/repository.py  - SQLAlchemy Core repository
+src/raft_agent/adapters/unit_of_work.py - transaction boundary
+src/raft_agent/domain/models.py        - Order, FilterCriteria, OrdersOutput
 tests/fakes.py                       - FakeLLM, FakeOrdersClient, FakeUnitOfWork
 tests/unit/test_domain.py            - domain model unit tests
 tests/unit/test_service.py           - service layer + parser unit tests

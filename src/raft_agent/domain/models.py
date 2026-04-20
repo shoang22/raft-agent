@@ -61,19 +61,16 @@ class USState(str, Enum):
 
 
 class Order(BaseModel):
-    orderId: str
-    buyer: str
-    state: USState
-    total: float
-
-    @field_validator("state", mode="before")
-    @classmethod
-    def normalize_state(cls, v: str) -> str:
-        return v.upper().strip()
+    orderId: str | None = None
+    buyer: str | None = None
+    state: USState | None = None
+    total: float | None = None
 
     @field_validator("total")
     @classmethod
-    def validate_total(cls, v: float) -> float:
+    def validate_total(cls, v: Optional[float]) -> Optional[float]:
+        if v is None:
+            return None
         if v < 0:
             raise ValueError("total must be non-negative")
         return round(v, 2)

@@ -2,3 +2,5 @@ temp/
 **/__pycache__/**
 .vscode/
 .env
+*.joblib
+*.db

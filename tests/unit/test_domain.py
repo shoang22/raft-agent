@@ -1,7 +1,7 @@
 """Unit tests for domain model — no infrastructure, no fakes needed."""
 import pytest
 
-from raft_llm.domain.models import Order, FilterCriteria
+from raft_agent.domain.models import Order, FilterCriteria
 
 
 class TestOrderModel:
@@ -11,10 +11,6 @@ class TestOrderModel:
         assert o.state == "OH"
         assert o.total == 742.10
 
-    def test_state_is_normalized_to_uppercase(self):
-        o = Order(orderId="1", buyer="X", state="oh", total=10.0)
-        assert o.state == "OH"
-
     def test_total_is_rounded_to_two_decimals(self):
         o = Order(orderId="1", buyer="X", state="OH", total=742.1099999)
         assert o.total == 742.11
@@ -23,9 +19,9 @@ class TestOrderModel:
         with pytest.raises(Exception):
             Order(orderId="1", buyer="X", state="OH", total=-5.0)
 
-    def test_missing_required_field_raises(self):
-        with pytest.raises(Exception):
-            Order(orderId="1", buyer="X", state="OH")  # missing total
+    def test_missing_total_defaults_to_none(self):
+        o = Order(orderId="1", buyer="X", state="OH")
+        assert o.total is None
 
 
 class TestFilterCriteria:
