@@ -1,6 +1,14 @@
 # RAFT Order Agent
 
-An AI agent that answers natural-language questions about customer orders. It fetches raw order data from a dummy API, parses it with an LLM, stores it in an in-memory SQLite database, and returns clean JSON — or a formatted table in the web UI.
+An AI agent that answers natural-language questions about customer orders. Given a question like _"Show me all orders from Ohio over $500"_, it:
+
+1. Fetches raw, deliberately messy text from a dummy orders API
+2. Uses an LLM to parse the unstructured text into structured `Order` objects
+3. Stores the parsed orders in an in-memory SQLite database
+4. Uses the LLM to translate the original question into a SQL query and executes it
+5. Returns clean JSON — or a formatted table in the web UI
+
+A linear regression model runs in the background to impute missing order totals from historical data, improving over time as more orders are parsed.
 
 ## Prerequisites
 
@@ -10,35 +18,38 @@ An AI agent that answers natural-language questions about customer orders. It fe
 ## Setup
 
 ```bash
+# Create and activate a virtual environment (recommended)
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+
 pip install -r requirements.txt
 
 cp .env.example .env
 # Edit .env and set OPENROUTER_API_KEY=<your key>
 ```
 
-Start the dummy orders API in a separate terminal:
+## Running
+
+You need **two terminals**: one for the dummy orders API and one for the agent.
+
+**Terminal 1 — start the dummy orders API:**
 
 ```bash
 python dummy_customer_api.py
+# Serves messy order text on http://localhost:5001
 ```
 
-## Running
-
-### Web UI (default)
+**Terminal 2 — run the agent:**
 
 ```bash
+# Web UI (default) — opens http://localhost:7860
 python main.py
-```
 
-Opens a Gradio chat interface at `http://localhost:7860`. Type any natural-language question about orders. Progress updates stream in real time before the result table appears.
-
-### CLI
-
-```bash
+# CLI — prints JSON to stdout, progress to stderr
 python main.py --cli "Show me all orders from Ohio over $500"
 ```
 
-Prints the result as formatted JSON to stdout.
+The web UI streams progress updates in real time as each pipeline stage completes, then renders the final result as a table.
 
 ## Example queries
 
@@ -59,11 +70,30 @@ List all orders under $200
 }
 ```
 
+## Environment variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `OPENROUTER_API_KEY` | Yes | API key for [OpenRouter](https://openrouter.ai/) |
+
+## Persistence
+
+Two SQLite databases are created at runtime:
+
+- **In-memory** (`sqlite:///:memory:`) — ephemeral store for the current query; wiped between runs
+- **`orders_training.db`** — persistent store that accumulates all parsed orders across runs; used to retrain the total-imputation predictor
+- **`total_predictor.joblib`** — persisted linear regression model; reloaded on startup so imputation is available immediately
+
 ## Running tests
 
 ```bash
-pytest
+pytest           # all tests
+pytest -v        # verbose
+pytest tests/unit/        # unit tests only (fast, no API required)
+pytest tests/integration/ # requires dummy API running on :5001
 ```
+
+The test suite uses in-memory fakes (no mocking) for all external dependencies. See `tests/fakes.py`.
 
 ## Architecture
 

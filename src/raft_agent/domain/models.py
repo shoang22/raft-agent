@@ -1,4 +1,4 @@
-"""Domain model — Order value object and FilterCriteria with filtering behaviour."""
+"""Domain model — Order and PartialOrder value objects, USState enum."""
 import logging
 from enum import Enum
 from typing import Optional
