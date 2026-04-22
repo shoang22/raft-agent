@@ -14,3 +14,4 @@ pytest-asyncio
 pytest-mock
 python-dotenv
 gradio
+langchain_openrouter
